@@ -33,7 +33,7 @@ app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
 app.use('/api', (err, _req, res, _next) => {
   const status = err.status || 502;
   if (status >= 500) console.error(`[api] ${err.message}`);
-  res.status(status).json({ error: err.message || 'Upstream error' });
+  res.status(status).json({ error: err.message || 'Upstream error', ...(err.code ? { code: err.code } : {}) });
 });
 
 // In production the built client is served from the same origin.

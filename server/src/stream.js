@@ -3,7 +3,7 @@
 // the requested range upstream in bounded chunks (the way real players do).
 import { Router } from 'express';
 import { once } from 'node:events';
-import { resolveStream, invalidateStream, UA } from './ytmusic.js';
+import { resolveStream, invalidateStream, ytFetch, UA } from './ytmusic.js';
 
 const router = Router();
 const QUALITIES = new Set(['low', 'medium', 'high']);
@@ -24,7 +24,7 @@ function parseRange(header, size) {
 }
 
 function fetchChunk(format, start, end, signal) {
-  return fetch(format.url, { headers: { Range: `bytes=${start}-${end}`, 'User-Agent': UA, Accept: '*/*' }, signal, redirect: 'follow' });
+  return ytFetch(format.url, { headers: { Range: `bytes=${start}-${end}`, 'User-Agent': UA, Accept: '*/*' }, signal, redirect: 'follow' });
 }
 
 /** Learn the total size when the format did not advertise one. */

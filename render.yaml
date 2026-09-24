@@ -8,4 +8,9 @@ services:
     healthCheckPath: /api/health
     envVars:
       - key: NODE_VERSION
-        value: 20
+        value: 22
+      # YouTube bot-checks datacenter IPs. Set at least one of these in the Render dashboard.
+      - key: YT_COOKIE
+        sync: false
+      - key: YT_PROXY
+        sync: false

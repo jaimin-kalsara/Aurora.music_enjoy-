@@ -97,11 +97,24 @@ export function AudioEngine() {
       const current = store().queue[store().index];
       store().setProgress(a.currentTime, a.duration || current?.duration || 0);
     };
-    const onError = () => {
+    const onError = async () => {
       const current = store().queue[store().index];
-      if (!current || !a.src) return;
-      failures.current += 1;
+      const src = a.src;
+      if (!current || !src) return;
       store().setBuffering(false);
+      // <audio> hides the HTTP status, so ask the server why. If the whole server is blocked by
+      // YouTube, every track would fail the same way: stop instead of skipping through the queue.
+      const reason = await fetch(src, { headers: { Range: 'bytes=0-0' } })
+        .then(async (r) => (r.ok ? null : ((await r.json().catch(() => null)) as { code?: string } | null)))
+        .catch(() => null);
+      if (a.src !== src) return; // user already moved on
+      if (reason?.code === 'BLOCKED') {
+        store().setPlaying(false);
+        failures.current = 0;
+        toast('Streaming is temporarily unavailable on this server. Please try again later.', 'error');
+        return;
+      }
+      failures.current += 1;
       if (failures.current > 3) {
         store().setPlaying(false);
         toast('Playback stopped: too many failed tracks', 'error');

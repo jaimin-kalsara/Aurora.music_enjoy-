@@ -3,6 +3,7 @@ import vm from 'node:vm';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Innertube, UniversalCache, Log, Platform } from 'youtubei.js';
+import { ProxyAgent, fetch as undiciFetch } from 'undici';
 import { createPoTokenMinter } from './potoken.js';
 
 Log.setLevel(Log.Level.ERROR);
@@ -21,6 +22,24 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CACHE_DIR = path.resolve(__dirname, '../.cache/youtubei.js');
 export const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36';
 
+// YouTube answers datacenter IPs (Render, Railway, etc.) with "Sign in to confirm you're not a bot".
+// Two ways around it, both optional: YT_COOKIE (the Cookie header of a signed-in YouTube session)
+// and/or YT_PROXY (an http(s) proxy, ideally residential) for every upstream request.
+const COOKIE = process.env.YT_COOKIE?.trim() || undefined;
+const proxyAgent = process.env.YT_PROXY ? new ProxyAgent(process.env.YT_PROXY) : null;
+
+/** fetch() that goes through YT_PROXY when configured. Used for InnerTube and media requests. */
+export const ytFetch = proxyAgent
+  ? (input, init = {}) => {
+      // youtubei.js hands us Request objects; unpack them so undici can apply the dispatcher.
+      if (input instanceof Request) {
+        const { url, method, headers, body, signal, redirect } = input;
+        return undiciFetch(url, { method, headers, body, signal, redirect, duplex: body ? 'half' : undefined, ...init, dispatcher: proxyAgent });
+      }
+      return undiciFetch(input, { ...init, dispatcher: proxyAgent });
+    }
+  : (input, init) => fetch(input, init);
+
 let clientPromise = null;
 let refreshTimer = null;
 let minter = null; // PO token minter (content-bound tokens for media streams)
@@ -28,6 +47,8 @@ const SESSION_OPTS = {
   location: process.env.YT_LOCATION || 'IN',
   lang: process.env.YT_LANG || 'en',
   user_agent: UA,
+  cookie: COOKIE,
+  fetch: ytFetch,
 };
 
 async function createClient() {
@@ -287,7 +308,12 @@ async function collectFormats(id) {
     }
     if (out.size >= 4) break;
   }
-  if (!out.size) throw upstream(`Stream unavailable (${errors.join('; ') || 'no audio formats'})`, 404);
+  if (!out.size) {
+    const message = `Stream unavailable (${errors.join('; ') || 'no audio formats'})`;
+    // A bot check is about this server's IP, not the track: every song will fail the same way.
+    if (/not a bot|LOGIN_REQUIRED/i.test(message)) throw Object.assign(upstream(message, 503), { code: 'BLOCKED' });
+    throw upstream(message, 404);
+  }
   return out;
 }
 
