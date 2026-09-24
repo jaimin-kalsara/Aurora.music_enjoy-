@@ -3,7 +3,6 @@ import vm from 'node:vm';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Innertube, UniversalCache, Log, Platform } from 'youtubei.js';
-import { ProxyAgent, fetch as undiciFetch } from 'undici';
 import { createPoTokenMinter } from './potoken.js';
 
 Log.setLevel(Log.Level.ERROR);
@@ -26,7 +25,10 @@ export const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 
 // Two ways around it, both optional: YT_COOKIE (the Cookie header of a signed-in YouTube session)
 // and/or YT_PROXY (an http(s) proxy, ideally residential) for every upstream request.
 const COOKIE = process.env.YT_COOKIE?.trim() || undefined;
-const proxyAgent = process.env.YT_PROXY ? new ProxyAgent(process.env.YT_PROXY) : null;
+// undici is only loaded when a proxy is configured, so startup never depends on it.
+const undici = process.env.YT_PROXY ? await import('undici') : null;
+const proxyAgent = undici ? new undici.ProxyAgent(process.env.YT_PROXY) : null;
+const undiciFetch = undici?.fetch;
 
 /** fetch() that goes through YT_PROXY when configured. Used for InnerTube and media requests. */
 export const ytFetch = proxyAgent
