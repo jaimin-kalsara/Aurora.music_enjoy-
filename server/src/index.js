@@ -21,6 +21,7 @@ app.use('/api', stream);
 
 app.use(compression());
 app.use(express.json({ limit: '64kb' }));
+app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
 app.use('/api', (_req, res, next) => {
   res.set('Cache-Control', 'public, max-age=60');
   next();

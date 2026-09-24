@@ -30,6 +30,10 @@ npm start          # serves the API and the built client on http://localhost:300
 
 `PORT` overrides the port.
 
+### Deploy on Render
+
+This repository includes `render.yaml` for a single Render web service. Create a new Blueprint from the repository and Render will run the client build, start the Express server, and use `/api/health` for health checks.
+
 ### Tests
 
 ```bash
