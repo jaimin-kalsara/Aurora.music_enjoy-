@@ -34,14 +34,14 @@ npm start          # serves the API and the built client on http://localhost:300
 
 This repository includes `render.yaml` for a single Render web service. Create a new Blueprint from the repository and Render will run the client build, start the Express server, and use `/api/health` for health checks.
 
-YouTube blocks most cloud/datacenter IPs (including Render) with *"Sign in to confirm you're not a bot"*, so audio will not play on a fresh deploy until you set at least one of these environment variables in the Render dashboard:
+YouTube blocks most cloud/datacenter IPs (including Render) with *"Sign in to confirm you're not a bot"*. No setup is needed for this: when the server is blocked, the player automatically switches to YouTube's official embedded player, which streams in the listener's own browser (it re-checks the server every 6 hours). The only difference is that the Streaming quality setting doesn't apply in that mode.
+
+Optionally, to stream through the server again (quality selection, gapless prefetch), set one of these environment variables in the Render dashboard:
 
 | Variable    | Value |
 | ----------- | ----- |
 | `YT_COOKIE` | The `Cookie` request header from a signed-in `music.youtube.com` tab (DevTools → Network → any request → Request Headers → `cookie`). Use a secondary Google account. |
 | `YT_PROXY`  | An HTTP(S) proxy URL, e.g. `http://user:pass@host:port`. Residential proxies work best. |
-
-When the server is blocked anyway, the player stops with a message instead of skipping through the queue.
 
 ### Tests
 

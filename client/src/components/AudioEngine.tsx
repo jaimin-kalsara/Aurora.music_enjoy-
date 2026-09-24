@@ -1,9 +1,10 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { usePlayer, useCurrentSong } from '../store/player';
 import { useLibrary } from '../store/library';
 import { api } from '../api';
 import { toast } from '../store/toast';
 import type { Quality, Song } from '../types';
+import { YT_STATE, embedModeRemembered, getEmbedPlayer, rememberEmbedMode, type EmbedHandlers } from '../utils/ytEmbed';
 
 /** Opus (WebM) is the best quality YouTube Music offers; Safari only plays the AAC (m4a) ladder. */
 const supportsOpus = (() => {
@@ -41,6 +42,13 @@ export function AudioEngine() {
   const failures = useRef(0);
   const playedSeconds = useRef(0);
   const switching = useRef(false);
+  // Embed mode: play through YouTube's IFrame player in the browser because our server is blocked.
+  const [embed, setEmbed] = useState(embedModeRemembered);
+  const embedRef = useRef(embed);
+  const embedLoadedId = useRef<string | null>(null);
+  useEffect(() => {
+    embedRef.current = embed;
+  }, [embed]);
 
   const song = useCurrentSong();
   const playing = usePlayer((s) => s.playing);
@@ -51,6 +59,43 @@ export function AudioEngine() {
   const quality = useLibrary((s) => s.settings.quality);
   const volume = useLibrary((s) => s.settings.volume);
   const autoplay = useLibrary((s) => s.settings.autoplay);
+
+  /** A single track failed: skip it, but give up after a few failures in a row. */
+  const [skipFailed] = useState(() => (title: string) => {
+    const store = usePlayer.getState();
+    failures.current += 1;
+    if (failures.current > 3) {
+      store.setPlaying(false);
+      toast('Playback stopped: too many failed tracks', 'error');
+      failures.current = 0;
+      return;
+    }
+    toast(`Couldn't play “${title}”, skipping`, 'error');
+    setTimeout(() => usePlayer.getState().next(), 400);
+  });
+
+  const [embedHandlers] = useState<EmbedHandlers>(() => ({
+    onState: (state) => {
+      const store = usePlayer.getState();
+      if (state === YT_STATE.BUFFERING) store.setBuffering(true);
+      else if (state === YT_STATE.PLAYING) {
+        store.setBuffering(false);
+        failures.current = 0;
+        if (!store.playing) store.setPlaying(true);
+      } else if (state === YT_STATE.PAUSED) {
+        store.setBuffering(false);
+        if (store.playing) store.setPlaying(false);
+      } else if (state === YT_STATE.ENDED) {
+        if (store.repeat === 'one') store.seek(0);
+        else store.next();
+      }
+    },
+    onError: () => {
+      const current = usePlayer.getState().queue[usePlayer.getState().index];
+      usePlayer.getState().setBuffering(false);
+      if (current) skipFailed(current.title);
+    },
+  }));
 
   // Create the element once.
   useEffect(() => {
@@ -109,25 +154,18 @@ export function AudioEngine() {
         .catch(() => null);
       if (a.src !== src) return; // user already moved on
       if (reason?.code === 'BLOCKED') {
-        store().setPlaying(false);
+        // Our server can't reach YouTube; play through the YouTube player in this browser instead.
         failures.current = 0;
-        toast('Streaming is temporarily unavailable on this server. Please try again later.', 'error');
+        rememberEmbedMode();
+        setEmbed(true);
         return;
       }
-      failures.current += 1;
-      if (failures.current > 3) {
-        store().setPlaying(false);
-        toast('Playback stopped: too many failed tracks', 'error');
-        failures.current = 0;
-        return;
-      }
-      toast(`Couldn't play “${current.title}”, skipping`, 'error');
-      setTimeout(() => store().next(), 400);
+      skipFailed(current.title);
     };
     // Keep the store honest when the OS pauses/resumes us (audio focus loss, headphones unplugged).
     // Pauses fired by loading a new source or by reaching the end are ignored.
     const onPause = () => {
-      if (a.ended || switching.current) return;
+      if (a.ended || switching.current || embedRef.current) return;
       if (store().playing) store().setPlaying(false);
     };
     const onPlay = () => {
@@ -160,8 +198,8 @@ export function AudioEngine() {
         ms.setActionHandler('seekto', (d) => {
           if (typeof d.seekTime === 'number') store().seek(d.seekTime);
         });
-        ms.setActionHandler('seekbackward', (d) => store().seek(Math.max(0, a.currentTime - (d.seekOffset || 10))));
-        ms.setActionHandler('seekforward', (d) => store().seek(Math.min(a.duration || 0, a.currentTime + (d.seekOffset || 10))));
+        ms.setActionHandler('seekbackward', (d) => store().seek(Math.max(0, store().currentTime - (d.seekOffset || 10))));
+        ms.setActionHandler('seekforward', (d) => store().seek(Math.min(store().duration || 0, store().currentTime + (d.seekOffset || 10))));
       } catch {
         /* unsupported */
       }
@@ -187,9 +225,9 @@ export function AudioEngine() {
       } else if (e.key === 'ArrowLeft' && e.shiftKey) {
         store().prev();
       } else if (e.key === 'ArrowRight') {
-        store().seek(Math.min(a.duration || 0, a.currentTime + 5));
+        store().seek(Math.min(store().duration || 0, store().currentTime + 5));
       } else if (e.key === 'ArrowLeft') {
-        store().seek(Math.max(0, a.currentTime - 5));
+        store().seek(Math.max(0, store().currentTime - 5));
       } else if (e.key.toLowerCase() === 'm') {
         const lib = useLibrary.getState();
         lib.updateSettings({ volume: lib.settings.volume > 0 ? 0 : 0.8 });
@@ -215,7 +253,7 @@ export function AudioEngine() {
       window.removeEventListener('keydown', onKey);
       document.removeEventListener('pointerup', onPointerUp);
     };
-  }, []);
+  }, [skipFailed]);
 
   // Track or quality change → load source.
   useEffect(() => {
@@ -224,24 +262,50 @@ export function AudioEngine() {
     if (!song) {
       a.pause();
       a.removeAttribute('src');
+      if (embed) void getEmbedPlayer(embedHandlers).then((p) => p.stopVideo());
+      embedLoadedId.current = null;
       lastSongId.current = null;
       document.title = 'Aurora Music';
       return;
     }
-    const url = pickStream(song, quality);
-    if (!url) {
-      usePlayer.getState().next();
-      return;
-    }
     const sameSong = lastSongId.current === song.id;
-    const absolute = new URL(url, window.location.origin).toString();
-    if (sameSong && a.currentSrc && a.currentSrc !== absolute) {
-      resumeAt.current = a.currentTime; // quality switch mid-track
-    }
-    if (!sameSong || a.currentSrc !== absolute) {
-      switching.current = true;
-      a.src = url;
-      a.load();
+    if (embed) {
+      if (a.src) {
+        a.pause();
+        a.removeAttribute('src');
+      }
+      if (embedLoadedId.current !== song.id) {
+        // Switching engines mid-track keeps the position; a new track starts from the top.
+        const startSeconds = sameSong ? usePlayer.getState().currentTime : 0;
+        embedLoadedId.current = song.id;
+        const id = song.id;
+        void getEmbedPlayer(embedHandlers)
+          .then((p) => {
+            if (embedLoadedId.current !== id) return;
+            p.setVolume(Math.round(Math.min(1, Math.max(0, useLibrary.getState().settings.volume)) * 100));
+            if (usePlayer.getState().playing) p.loadVideoById({ videoId: id, startSeconds });
+            else p.cueVideoById({ videoId: id, startSeconds });
+          })
+          .catch(() => {
+            usePlayer.getState().setPlaying(false);
+            toast('Could not load the YouTube player. Check your connection.', 'error');
+          });
+      }
+    } else {
+      const url = pickStream(song, quality);
+      if (!url) {
+        usePlayer.getState().next();
+        return;
+      }
+      const absolute = new URL(url, window.location.origin).toString();
+      if (sameSong && a.currentSrc && a.currentSrc !== absolute) {
+        resumeAt.current = a.currentTime; // quality switch mid-track
+      }
+      if (!sameSong || a.currentSrc !== absolute) {
+        switching.current = true;
+        a.src = url;
+        a.load();
+      }
     }
     if (!sameSong) {
       // A skip is a track that was left before 30% or 30 seconds.
@@ -269,7 +333,7 @@ export function AudioEngine() {
         });
       }
     }
-    if (usePlayer.getState().playing) {
+    if (usePlayer.getState().playing && !embed) {
       a.play().catch((err: unknown) => {
         if (err instanceof DOMException && err.name === 'NotAllowedError') {
           usePlayer.getState().setPlaying(false);
@@ -277,13 +341,20 @@ export function AudioEngine() {
         }
       });
     }
-  }, [song, quality]);
+  }, [song, quality, embed, embedHandlers]);
 
   // Play / pause.
   useEffect(() => {
     const a = audioRef.current;
     if (!a || !song) return;
-    if (playing) {
+    if (embed) {
+      void getEmbedPlayer(embedHandlers).then((p) => {
+        if (embedLoadedId.current !== song.id) return;
+        const state = p.getPlayerState();
+        if (playing && state !== YT_STATE.PLAYING && state !== YT_STATE.BUFFERING) p.playVideo();
+        else if (!playing && (state === YT_STATE.PLAYING || state === YT_STATE.BUFFERING)) p.pauseVideo();
+      });
+    } else if (playing) {
       if (!a.src) return;
       a.play().catch((err: unknown) => {
         if (err instanceof DOMException && err.name === 'NotAllowedError') {
@@ -294,26 +365,68 @@ export function AudioEngine() {
       a.pause();
     }
     if ('mediaSession' in navigator) navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
-  }, [playing, song]);
+  }, [playing, song, embed, embedHandlers]);
+
+  // Browsers may refuse to start the embed without a tap; don't show "playing" when nothing plays.
+  useEffect(() => {
+    if (!embed || !playing || !song) return;
+    const timer = setTimeout(() => {
+      void getEmbedPlayer(embedHandlers).then((p) => {
+        const state = p.getPlayerState();
+        if (usePlayer.getState().playing && (state === YT_STATE.UNSTARTED || state === YT_STATE.CUED)) {
+          usePlayer.getState().setPlaying(false);
+          toast('Tap play to start listening');
+        }
+      });
+    }, 6000);
+    return () => clearTimeout(timer);
+  }, [embed, playing, song, embedHandlers]);
+
+  // Embed mode: poll the YouTube player for progress (it has no timeupdate event).
+  useEffect(() => {
+    if (!embed) return;
+    const timer = setInterval(() => {
+      void getEmbedPlayer(embedHandlers).then((p) => {
+        const state = p.getPlayerState();
+        if (state !== YT_STATE.PLAYING && state !== YT_STATE.PAUSED && state !== YT_STATE.BUFFERING) return;
+        const store = usePlayer.getState();
+        const current = store.queue[store.index];
+        if (!current || embedLoadedId.current !== current.id) return;
+        const time = p.getCurrentTime() || 0;
+        playedSeconds.current = time;
+        store.setProgress(time, p.getDuration() || current.duration || 0);
+      });
+    }, 250);
+    return () => clearInterval(timer);
+  }, [embed, embedHandlers]);
 
   // Seek command.
   useEffect(() => {
     const a = audioRef.current;
     if (!a || seekTo === null) return;
-    if (Number.isFinite(seekTo)) a.currentTime = seekTo;
+    if (Number.isFinite(seekTo)) {
+      if (embed) {
+        void getEmbedPlayer(embedHandlers).then((p) => {
+          p.seekTo(seekTo, true);
+          if (usePlayer.getState().playing) p.playVideo();
+        });
+      } else a.currentTime = seekTo;
+    }
     usePlayer.getState().consumeSeek();
-  }, [seekTo]);
+  }, [seekTo, embed, embedHandlers]);
 
   // Volume.
   useEffect(() => {
     const a = audioRef.current;
-    if (a) a.volume = Math.min(1, Math.max(0, volume));
-  }, [volume]);
+    const v = Math.min(1, Math.max(0, volume));
+    if (a) a.volume = v;
+    if (embed) void getEmbedPlayer(embedHandlers).then((p) => p.setVolume(Math.round(v * 100)));
+  }, [volume, embed, embedHandlers]);
 
   // Prefetch the next track once we're a good way into the current one.
   useEffect(() => {
     const p = prefetchRef.current;
-    if (!p || !nextSong) return;
+    if (!p || !nextSong || embed) return;
     const url = pickStream(nextSong, quality);
     if (!url) return;
     let done = false;
@@ -328,7 +441,7 @@ export function AudioEngine() {
       }
     });
     return unsub;
-  }, [nextSong, quality]);
+  }, [nextSong, quality, embed]);
 
   // Queue exhausted → autoplay related songs.
   useEffect(() => {
