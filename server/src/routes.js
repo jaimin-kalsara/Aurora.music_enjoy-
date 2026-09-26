@@ -186,6 +186,17 @@ router.get(
 );
 
 /* ----------------------------------------------------------------- moods */
+/* ------------------------------------------------------------ alternates */
+router.get(
+  '/alternates/:id',
+  wrap(async (req, res) => {
+    const id = String(req.params.id);
+    const q = String(req.query.q || '').trim().slice(0, 200);
+    if (!VIDEO_ID.test(id) || !q) return res.status(400).json({ error: 'Invalid request' });
+    res.json({ ids: await catalog.getAlternates(id, q, clamp(req.query.d, 0, 36000, 0)) });
+  }),
+);
+
 router.get('/moods', (_req, res) => res.json({ moods: MOODS }));
 
 router.get(

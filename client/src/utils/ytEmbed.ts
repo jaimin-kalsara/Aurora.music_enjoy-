@@ -71,8 +71,19 @@ export function getEmbedPlayer(handlers: EmbedHandlers): Promise<YTPlayer> {
       new Promise<YTPlayer>((resolve) => {
         const host = document.createElement('div');
         host.setAttribute('aria-hidden', 'true');
-        // Offscreen but still "visible" to the browser, so it is allowed to play.
-        Object.assign(host.style, { position: 'fixed', left: '-10000px', bottom: '0', width: '200px', height: '200px', pointerEvents: 'none' });
+        // Inside the viewport but invisible: browsers throttle or pause offscreen cross-origin
+        // frames, which caused stutter and stalls. 200px is YouTube's minimum playable size.
+        Object.assign(host.style, {
+          position: 'fixed',
+          left: '0',
+          bottom: '0',
+          width: '200px',
+          height: '200px',
+          opacity: '0',
+          zIndex: '-1',
+          pointerEvents: 'none',
+          overflow: 'hidden',
+        });
         const mount = document.createElement('div');
         host.appendChild(mount);
         document.body.appendChild(host);

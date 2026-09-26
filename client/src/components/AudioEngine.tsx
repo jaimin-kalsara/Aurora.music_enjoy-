@@ -29,6 +29,18 @@ export function qualityLabel(quality: Quality): string {
   return supportsOpus ? 'Opus · 50 kbps' : 'AAC · 48 kbps';
 }
 
+/** True when the page is backgrounded: hidden, or visible on paper but no longer rendering frames. */
+function inBackground(): Promise<boolean> {
+  if (document.visibilityState === 'hidden') return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(true), 500);
+    requestAnimationFrame(() => {
+      clearTimeout(timer);
+      resolve(false);
+    });
+  });
+}
+
 /**
  * Owns the single <audio> element. Mirrors the player store into the element and
  * reports playback progress back. Also handles OS media keys, autoplay radio, and
@@ -45,7 +57,11 @@ export function AudioEngine() {
   // Embed mode: play through YouTube's IFrame player in the browser because our server is blocked.
   const [embed, setEmbed] = useState(embedModeRemembered);
   const embedRef = useRef(embed);
-  const embedLoadedId = useRef<string | null>(null);
+  const embedLoadedId = useRef<string | null>(null); // queue song the embed player is on
+  const embedVideoId = useRef<string | null>(null); // video actually loaded (may be an alternate upload)
+  const altFor = useRef(new Map<string, string>()); // song id -> embeddable alternate that worked
+  const altTry = useRef<{ songId: string; ids: string[] | null; used: Set<string> } | null>(null);
+  const serverFailures = useRef(0);
   useEffect(() => {
     embedRef.current = embed;
   }, [embed]);
@@ -64,7 +80,8 @@ export function AudioEngine() {
   const [skipFailed] = useState(() => (title: string) => {
     const store = usePlayer.getState();
     failures.current += 1;
-    if (failures.current > 3) {
+    // In embed mode failures are per-track (owner blocked embedding), so allow a longer run.
+    if (failures.current > (embedRef.current ? 6 : 3)) {
       store.setPlaying(false);
       toast('Playback stopped: too many failed tracks', 'error');
       failures.current = 0;
@@ -74,28 +91,101 @@ export function AudioEngine() {
     setTimeout(() => usePlayer.getState().next(), 400);
   });
 
-  const [embedHandlers] = useState<EmbedHandlers>(() => ({
-    onState: (state) => {
-      const store = usePlayer.getState();
-      if (state === YT_STATE.BUFFERING) store.setBuffering(true);
-      else if (state === YT_STATE.PLAYING) {
-        store.setBuffering(false);
-        failures.current = 0;
-        if (!store.playing) store.setPlaying(true);
-      } else if (state === YT_STATE.PAUSED) {
-        store.setBuffering(false);
-        if (store.playing) store.setPlaying(false);
-      } else if (state === YT_STATE.ENDED) {
-        if (store.repeat === 'one') store.seek(0);
-        else store.next();
+  const [{ handlers: embedHandlers, load: loadEmbed }] = useState(() => {
+    let loadedAt = -Infinity;
+    let resumes: number[] = []; // background auto-resumes in the last minute
+    const load = (songId: string, videoId: string, startSeconds: number) => {
+      embedVideoId.current = videoId;
+      loadedAt = performance.now();
+      void getEmbedPlayer(handlers)
+        .then((p) => {
+          if (embedLoadedId.current !== songId || embedVideoId.current !== videoId) return;
+          p.setVolume(Math.round(Math.min(1, Math.max(0, useLibrary.getState().settings.volume)) * 100));
+          if (usePlayer.getState().playing) p.loadVideoById({ videoId, startSeconds });
+          else p.cueVideoById({ videoId, startSeconds });
+        })
+        .catch(() => {
+          usePlayer.getState().setPlaying(false);
+          toast('Could not load the YouTube player. Check your connection.', 'error');
+        });
+    };
+
+    /** The track can't play in the embed (usually embedding disabled): try another upload of it. */
+    const tryAlternate = async (song: Song) => {
+      let t = altTry.current;
+      if (!t || t.songId !== song.id) {
+        t = { songId: song.id, ids: null, used: new Set([song.id]) };
+        altTry.current = t;
       }
-    },
-    onError: () => {
-      const current = usePlayer.getState().queue[usePlayer.getState().index];
-      usePlayer.getState().setBuffering(false);
-      if (current) skipFailed(current.title);
-    },
-  }));
+      if (embedVideoId.current) t.used.add(embedVideoId.current);
+      altFor.current.delete(song.id);
+      if (!t.ids) {
+        const query = `${song.title} ${song.artistNames || song.subtitle || ''}`.trim();
+        t.ids = await api
+          .alternates(song.id, query, song.duration)
+          .then((r) => r.ids)
+          .catch(() => []);
+      }
+      if (embedLoadedId.current !== song.id) return; // user moved on meanwhile
+      const used = t.used;
+      const next = t.ids.find((id) => !used.has(id));
+      if (next) {
+        used.add(next);
+        altFor.current.set(song.id, next);
+        usePlayer.getState().setBuffering(true);
+        load(song.id, next, 0);
+      } else {
+        usePlayer.getState().setBuffering(false);
+        skipFailed(song.title);
+      }
+    };
+
+    const handlers: EmbedHandlers = {
+      onState: (state) => {
+        const store = usePlayer.getState();
+        if (state === YT_STATE.BUFFERING) store.setBuffering(true);
+        else if (state === YT_STATE.PLAYING) {
+          store.setBuffering(false);
+          failures.current = 0;
+          if (!store.playing) store.setPlaying(true);
+        } else if (state === YT_STATE.PAUSED) {
+          store.setBuffering(false);
+          if (!store.playing) return;
+          void getEmbedPlayer(handlers).then((p) => {
+            if (!usePlayer.getState().playing) return;
+            // YouTube reports PAUSED right before ENDED, and a stale one can trail a track change.
+            // Neither is the listener pausing; treating them as such stopped the next song.
+            const left = p.getDuration() - p.getCurrentTime();
+            if ((p.getDuration() > 0 && left < 1.5) || performance.now() - loadedAt < 2000) return;
+            // Pauses from our own controls flip the store first, so this one came from outside:
+            // usually YouTube or the browser pausing a background page (hidden tab, minimized
+            // window, locked phone). Keep the music going, but don't fight repeated pauses.
+            void inBackground().then((background) => {
+              if (!usePlayer.getState().playing || p.getPlayerState() !== YT_STATE.PAUSED) return;
+              const now = performance.now();
+              resumes = resumes.filter((t) => now - t < 60_000);
+              if (background && resumes.length < 3) {
+                resumes.push(now);
+                p.playVideo();
+                return;
+              }
+              usePlayer.getState().setPlaying(false);
+            });
+          });
+        } else if (state === YT_STATE.ENDED) {
+          if (store.repeat === 'one') store.seek(0);
+          else store.next();
+        }
+      },
+      onError: () => {
+        const store = usePlayer.getState();
+        const current = store.queue[store.index];
+        if (!current || embedLoadedId.current !== current.id) return;
+        void tryAlternate(current);
+      },
+    };
+    return { handlers, load };
+  });
 
   // Create the element once.
   useEffect(() => {
@@ -139,6 +229,7 @@ export function AudioEngine() {
         resumeAt.current = null;
       }
       failures.current = 0;
+      serverFailures.current = 0;
       const current = store().queue[store().index];
       store().setProgress(a.currentTime, a.duration || current?.duration || 0);
     };
@@ -153,9 +244,12 @@ export function AudioEngine() {
         .then(async (r) => (r.ok ? null : ((await r.json().catch(() => null)) as { code?: string } | null)))
         .catch(() => null);
       if (a.src !== src) return; // user already moved on
-      if (reason?.code === 'BLOCKED') {
-        // Our server can't reach YouTube; play through the YouTube player in this browser instead.
+      serverFailures.current += 1;
+      // Our server can't reach YouTube (explicitly blocked, or two different tracks in a row failed):
+      // play through the YouTube player in this browser instead of skipping through the queue.
+      if (reason?.code === 'BLOCKED' || serverFailures.current >= 2) {
         failures.current = 0;
+        serverFailures.current = 0;
         rememberEmbedMode();
         setEmbed(true);
         return;
@@ -278,18 +372,8 @@ export function AudioEngine() {
         // Switching engines mid-track keeps the position; a new track starts from the top.
         const startSeconds = sameSong ? usePlayer.getState().currentTime : 0;
         embedLoadedId.current = song.id;
-        const id = song.id;
-        void getEmbedPlayer(embedHandlers)
-          .then((p) => {
-            if (embedLoadedId.current !== id) return;
-            p.setVolume(Math.round(Math.min(1, Math.max(0, useLibrary.getState().settings.volume)) * 100));
-            if (usePlayer.getState().playing) p.loadVideoById({ videoId: id, startSeconds });
-            else p.cueVideoById({ videoId: id, startSeconds });
-          })
-          .catch(() => {
-            usePlayer.getState().setPlaying(false);
-            toast('Could not load the YouTube player. Check your connection.', 'error');
-          });
+        altTry.current = null;
+        loadEmbed(song.id, altFor.current.get(song.id) ?? song.id, startSeconds);
       }
     } else {
       const url = pickStream(song, quality);
@@ -341,7 +425,7 @@ export function AudioEngine() {
         }
       });
     }
-  }, [song, quality, embed, embedHandlers]);
+  }, [song, quality, embed, embedHandlers, loadEmbed]);
 
   // Play / pause.
   useEffect(() => {
@@ -368,19 +452,42 @@ export function AudioEngine() {
   }, [playing, song, embed, embedHandlers]);
 
   // Browsers may refuse to start the embed without a tap; don't show "playing" when nothing plays.
+  // Only judged while the page is visible: a background tab is slow to start, not refusing.
   useEffect(() => {
     if (!embed || !playing || !song) return;
     const timer = setTimeout(() => {
+      if (document.visibilityState !== 'visible') return;
       void getEmbedPlayer(embedHandlers).then((p) => {
         const state = p.getPlayerState();
-        if (usePlayer.getState().playing && (state === YT_STATE.UNSTARTED || state === YT_STATE.CUED)) {
+        if (usePlayer.getState().playing && embedLoadedId.current === song.id && (state === YT_STATE.UNSTARTED || state === YT_STATE.CUED)) {
           usePlayer.getState().setPlaying(false);
           toast('Tap play to start listening');
         }
       });
-    }, 6000);
+    }, 8000);
     return () => clearTimeout(timer);
   }, [embed, playing, song, embedHandlers]);
+
+  // Back from the background: resume a track the browser paused behind our back or couldn't
+  // start while hidden (e.g. the next song in a locked phone).
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') return;
+      const store = usePlayer.getState();
+      if (!store.playing || !store.queue[store.index]) return;
+      if (embedRef.current) {
+        void getEmbedPlayer(embedHandlers).then((p) => {
+          const state = p.getPlayerState();
+          if (usePlayer.getState().playing && state !== YT_STATE.PLAYING && state !== YT_STATE.BUFFERING) p.playVideo();
+        });
+      } else {
+        const a = audioRef.current;
+        if (a?.src && a.paused && !a.ended) void a.play().catch(() => undefined);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [embedHandlers]);
 
   // Embed mode: poll the YouTube player for progress (it has no timeupdate event).
   useEffect(() => {

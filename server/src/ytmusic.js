@@ -312,8 +312,9 @@ async function collectFormats(id) {
   }
   if (!out.size) {
     const message = `Stream unavailable (${errors.join('; ') || 'no audio formats'})`;
-    // A bot check is about this server's IP, not the track: every song will fail the same way.
-    if (/not a bot|LOGIN_REQUIRED/i.test(message)) throw Object.assign(upstream(message, 503), { code: 'BLOCKED' });
+    // A bot check (or a flat 403/429 on the player endpoint) is about this server's IP, not the
+    // track: every song will fail the same way, so tell the client to play through YouTube itself.
+    if (/not a bot|LOGIN_REQUIRED|sign in|status code (403|429)/i.test(message)) throw Object.assign(upstream(message, 503), { code: 'BLOCKED' });
     throw upstream(message, 404);
   }
   return out;
@@ -338,4 +339,30 @@ export async function resolveStream(id, quality = 'high', fmt = 'webm', { force 
 
 export function invalidateStream(id) {
   streamCache.delete(id);
+}
+
+/* ------------------------------------------------------------- alternates */
+
+const ALT_NOISE = /\b(live|cover|karaoke|remix|reaction|instrumental|slowed|reverb|sped up|8d|nightcore|1 hour|lesson|tutorial)\b/i;
+
+/**
+ * Other YouTube uploads of the same song (official video, lyric video, audio), for tracks whose
+ * owner disabled embedding. Filters out covers/live cuts and anything far off the original length.
+ */
+export async function alternates(query, excludeId, duration = 0) {
+  const yt = await getClient();
+  const res = await yt.search(query, { type: 'video' });
+  const keepNoise = ALT_NOISE.test(query);
+  const out = [];
+  for (const v of res.videos || []) {
+    const id = v.id || v.video_id;
+    if (!id || id === excludeId || out.includes(id)) continue;
+    const title = v.title?.toString() || '';
+    if (!keepNoise && ALT_NOISE.test(title)) continue;
+    const secs = v.duration?.seconds || 0;
+    if (duration && secs && Math.abs(secs - duration) > Math.max(30, duration * 0.25)) continue;
+    out.push(id);
+    if (out.length >= 4) break;
+  }
+  return out;
 }

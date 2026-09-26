@@ -65,6 +65,10 @@ router.get('/stream/:id', async (req, res, next) => {
     }
     if (!upstream.ok) {
       await upstream.body?.cancel().catch(() => undefined);
+      // Fresh URLs still refused: YouTube is blocking this server's IP, not this track.
+      if (upstream.status === 403 || upstream.status === 429) {
+        return res.status(503).json({ error: `Upstream responded ${upstream.status}`, code: 'BLOCKED' });
+      }
       return res.status(502).json({ error: `Upstream responded ${upstream.status}` });
     }
     if (!size) size = parseInt((upstream.headers.get('content-range') || '').split('/')[1], 10) || 0;

@@ -354,3 +354,7 @@ export const getRadio = (id, limit = 30) =>
   });
 
 export { uniqBy };
+
+/** Embeddable stand-ins for a track whose owner blocks the YouTube embed player. */
+export const getAlternates = (id, query, duration) =>
+  cached(`alt:${id}`, TTL.long, () => yt.alternates(query, id, duration));

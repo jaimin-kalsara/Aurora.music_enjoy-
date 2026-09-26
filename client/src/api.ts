@@ -103,6 +103,7 @@ export const api = {
       signal,
     ),
   radio: (id: string) => get<{ songs: Song[] }>(`/radio/${id}`),
+  alternates: (id: string, q: string, d: number) => get<{ ids: string[] }>(`/alternates/${id}`, { q, d: Math.round(d) || undefined }),
   moods: () => get<{ moods: Mood[] }>('/moods'),
   mood: (key: string) => get<{ mood: Mood; songs: Song[]; playlists: Playlist[] }>(`/moods/${key}`),
 
