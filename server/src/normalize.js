@@ -24,9 +24,10 @@ function artistsFromMap(map, fallbackSubtitle = '') {
   const list = [];
   const seen = new Set();
   const push = (a) => {
-    if (!a || !a.name || seen.has(a.id || a.name)) return;
-    seen.add(a.id || a.name);
-    list.push({ id: a.id || '', name: decode(a.name), image: bigImage(a.image), role: a.role || '' });
+    const name = a ? decode(a.name).trim() : ''; // upstream sometimes pads names with a leading space
+    if (!name || seen.has(a.id || name)) return;
+    seen.add(a.id || name);
+    list.push({ id: a.id || '', name, image: bigImage(a.image), role: a.role || '' });
   };
   if (map) {
     (map.primary_artists || []).forEach(push);

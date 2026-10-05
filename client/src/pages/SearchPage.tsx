@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { motion } from 'framer-motion';
 import { api } from '../api';
 import { useQuery } from '../hooks/useQuery';
 import { useLibrary } from '../store/library';
@@ -25,31 +24,44 @@ const TABS: { key: Tab; label: string }[] = [
 
 function TopResult({ item }: { item: Entity }) {
   const navigate = useNavigate();
-  const { playEntity } = usePlayEntity();
+  const { playEntity, busyId } = usePlayEntity();
   const path = entityPath(item);
-  const sub = item.type === 'song' ? item.artistNames : item.type === 'artist' ? 'Artist' : item.type === 'album' ? `Album · ${item.subtitle}` : 'Playlist';
+  const sub = item.type === 'song' ? `Song · ${item.artistNames}` : item.type === 'artist' ? 'Artist' : item.type === 'album' ? `Album · ${item.subtitle}` : 'Playlist';
+  const open = () => (path ? navigate(path) : void playEntity(item));
   return (
-    <motion.div
-      className="card"
-      style={{ width: '100%', maxWidth: 520, display: 'flex', gap: 20, alignItems: 'center', padding: 18, margin: 0, background: 'var(--surface)', border: '1px solid var(--border)' }}
+    <div
+      className="card top-result"
       role="button"
       tabIndex={0}
-      onClick={() => (path ? navigate(path) : playEntity(item))}
-      whileHover={{ scale: 1.005 }}
-      transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+      aria-label={`${item.title}, ${sub}`}
+      onClick={open}
+      onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return;
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          open();
+        }
+      }}
     >
-      <div className={`card-art ${item.type === 'artist' ? 'round' : ''}`} style={{ width: 120, flex: 'none', borderRadius: item.type === 'artist' ? '50%' : 12 }}>
+      <div className={`card-art ${item.type === 'artist' ? 'round' : ''}`}>
         <Img src={item.image} alt="" />
       </div>
       <div style={{ minWidth: 0, flex: 1 }}>
-        <div className="hero-kind">Top result</div>
-        <h2 className="truncate" style={{ fontSize: 26, marginTop: 4 }}>{item.title}</h2>
+        <h3 className="truncate">{item.title}</h3>
         <div className="muted truncate">{sub}</div>
       </div>
-      <button className="card-play visible" style={{ position: 'static', transform: 'none', width: 52, height: 52 }} onClick={(e) => { e.stopPropagation(); void playEntity(item); }} aria-label={`Play ${item.title}`}>
-        <Play size={22} />
+      <button
+        className="play-btn"
+        onClick={(e) => {
+          e.stopPropagation();
+          void playEntity(item);
+        }}
+        aria-label={`Play ${item.title}`}
+        disabled={busyId === item.id}
+      >
+        {busyId === item.id ? <span className="spinner" /> : <Play size={22} />}
       </button>
-    </motion.div>
+    </div>
   );
 }
 
@@ -64,7 +76,7 @@ function FilteredResults({ q, tab }: { q: string; tab: Exclude<Tab, 'all'> }) {
     return bucket;
   });
   const items = page === 1 && data ? data.results : acc;
-  if (error) return <div className="error-box">{error}</div>;
+  if (error) return <div className="error-box" role="alert">{error}</div>;
   if (!items.length && loading) return tab === 'songs' ? <ListSkeleton /> : <ShelfSkeleton title={false} />;
   if (!items.length) return <div className="empty"><h3>No {tab} found</h3><p>Try a different spelling or search for the artist.</p></div>;
   const total = data?.total ?? 0;
@@ -77,7 +89,7 @@ function FilteredResults({ q, tab }: { q: string; tab: Exclude<Tab, 'all'> }) {
       )}
       {items.length < total && (
         <div style={{ display: 'flex', justifyContent: 'center', padding: 20 }}>
-          <button className="btn btn-ghost" onClick={() => setPage((p) => p + 1)} disabled={loading}>
+          <button className="btn btn-ghost glass clear" onClick={() => setPage((p) => p + 1)} disabled={loading}>
             {loading ? 'Loading…' : 'Load more'}
           </button>
         </div>
@@ -117,7 +129,7 @@ export function SearchPage() {
       <div className="page">
         <div className="page-title">
           <h1>Search</h1>
-          <p className="muted" style={{ fontSize: 17 }}>Find any song, artist, album or playlist. Press ⌘K / Ctrl+K to jump to the search box.</p>
+          <p className="lede">Find any song, artist, album or playlist. Press ⌘K or Ctrl K to jump to the search box from anywhere.</p>
         </div>
         {recentSearches.length > 0 && (
           <section className="shelf">
@@ -143,7 +155,7 @@ export function SearchPage() {
   return (
     <div className="page">
       <div className="page-title">
-        <h1 style={{ fontSize: 32 }}>Results for “{q}”</h1>
+        <h1 style={{ fontSize: 32, overflowWrap: 'anywhere' }}>Results for “{q}”</h1>
       </div>
       <div className="tabs" role="tablist">
         {TABS.map((t) => (
@@ -156,7 +168,7 @@ export function SearchPage() {
       {tab !== 'all' ? (
         <FilteredResults key={`${tab}:${q}`} q={q} tab={tab} />
       ) : error ? (
-        <div className="error-box">{error}</div>
+        <div className="error-box" role="alert">{error}</div>
       ) : loading && !data ? (
         <>
           <ListSkeleton rows={6} />
@@ -166,16 +178,21 @@ export function SearchPage() {
         <>
           {top && (
             <div className="search-top">
-              <TopResult item={top} />
-              <div>
-                <h2 style={{ marginBottom: 6 }}>Songs</h2>
-                <SongList songs={data.songs.results.slice(0, 6)} context={{ type: 'search', title: `Results for “${q}”` }} showAlbum={false} showHeader={false} />
-                {data.songs.total > 6 && (
-                  <button className="chip" onClick={() => setTab('songs')} style={{ marginLeft: 14 }}>
-                    See all {data.songs.total.toLocaleString()} songs
-                  </button>
-                )}
-              </div>
+              <section aria-label="Top result">
+                <h2>Top result</h2>
+                <TopResult item={top} />
+              </section>
+              {data.songs.results.length > 0 && (
+                <section aria-label="Songs">
+                  <h2>Songs</h2>
+                  <SongList songs={data.songs.results.slice(0, 5)} context={{ type: 'search', title: `Results for “${q}”` }} showAlbum={false} showHeader={false} />
+                  {data.songs.total > 5 && (
+                    <button className="chip" onClick={() => setTab('songs')} style={{ marginLeft: 12, marginTop: 4 }}>
+                      See all {data.songs.total.toLocaleString()} songs
+                    </button>
+                  )}
+                </section>
+              )}
             </div>
           )}
           <Shelf title="Artists" items={data.artists.results as ArtistCard[]} seeAllTo={`/search?q=${encodeURIComponent(q)}&tab=artists`} size="sm" />

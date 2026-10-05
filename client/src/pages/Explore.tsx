@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import { EASE_OUT } from '../utils/motion';
 import { api } from '../api';
 import { useQuery } from '../hooks/useQuery';
 import { useLibrary } from '../store/library';
@@ -17,7 +18,7 @@ export function MoodGrid({ limit }: { limit?: number }) {
   return (
     <div className="mood-grid">
       {list.map((m, i) => (
-        <motion.div key={m.key} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, delay: Math.min(i * 0.04, 0.4), ease: [0.22, 1, 0.36, 1] }}>
+        <motion.div key={m.key} initial={{ opacity: 0, transform: 'translateY(10px)' }} animate={{ opacity: 1, transform: 'translateY(0px)' }} transition={{ duration: 0.32, delay: Math.min(i * 0.03, 0.24), ease: EASE_OUT }}>
           <Link
             to={`/moods/${m.key}`}
             className="mood-card"
@@ -52,7 +53,7 @@ export function Explore() {
     <div className="page">
       <div className="page-title">
         <h1>Explore</h1>
-        <p className="muted" style={{ fontSize: 17 }}>Moods, charts and everything that dropped this week.</p>
+        <p className="lede">Moods, charts and everything that dropped this week.</p>
       </div>
 
       <section className="shelf">

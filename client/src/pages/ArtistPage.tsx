@@ -25,9 +25,9 @@ export function ArtistPage() {
   if (error) {
     return (
       <div className="page">
-        <div className="error-box">
+        <div className="error-box" role="alert">
           <span>{error}</span>
-          <button className="btn btn-ghost btn-sm" onClick={refetch}>Retry</button>
+          <button className="btn btn-ghost glass clear btn-sm" onClick={refetch}>Try again</button>
         </div>
       </div>
     );
@@ -52,17 +52,17 @@ export function ArtistPage() {
   return (
     <div className="page">
       <Hero
-        kind={data.verified ? 'Verified artist' : 'Artist'}
+        kind="Artist"
         title={data.title}
         image={data.image}
         round
         subtitle={
           data.verified ? (
-            <span className="row" style={{ gap: 6 }}>
-              <span style={{ display: 'inline-grid', placeItems: 'center', width: 18, height: 18, borderRadius: '50%', background: '#fff', color: '#000' }}>
+            <span className="verified">
+              <i aria-hidden>
                 <Check size={12} />
-              </span>
-              Verified
+              </i>
+              Verified artist
             </span>
           ) : undefined
         }
@@ -73,7 +73,7 @@ export function ArtistPage() {
               {isCurrent && playing ? <Pause size={18} /> : <Play size={18} />}
               {isCurrent && playing ? 'Pause' : 'Play'}
             </button>
-            <button className="btn btn-ghost" onClick={() => start(true)} disabled={!songs.length}>
+            <button className="btn btn-ghost glass clear" onClick={() => start(true)} disabled={!songs.length}>
               <Shuffle size={18} /> Shuffle
             </button>
           </>
@@ -86,7 +86,7 @@ export function ArtistPage() {
         </div>
         <SongList songs={shown} context={context} showHeader={false} />
         {data.topSongs.length > 5 && (
-          <button className="chip" style={{ marginLeft: 14, marginTop: 6 }} onClick={() => setShowAll((v) => !v)}>
+          <button className="chip" style={{ marginLeft: 12, marginTop: 8 }} onClick={() => setShowAll((v) => !v)} aria-expanded={showAll}>
             {showAll ? 'Show less' : `Show all ${data.topSongs.length}`}
           </button>
         )}
@@ -103,10 +103,10 @@ export function ArtistPage() {
           <div className="shelf-head">
             <h2>About</h2>
           </div>
-          <p className="muted" style={{ maxWidth: 760, whiteSpace: 'pre-line', display: bioOpen ? 'block' : '-webkit-box', WebkitLineClamp: bioOpen ? 'unset' : 4, WebkitBoxOrient: 'vertical', overflow: 'hidden', lineHeight: 1.6 }}>
+          <p className="muted" style={{ maxWidth: '68ch', whiteSpace: 'pre-line', display: bioOpen ? 'block' : '-webkit-box', WebkitLineClamp: bioOpen ? 'unset' : 4, WebkitBoxOrient: 'vertical', overflow: 'hidden', lineHeight: 1.6 }}>
             {data.bio}
           </p>
-          <button className="chip" style={{ marginTop: 10 }} onClick={() => setBioOpen((v) => !v)}>
+          <button className="chip" style={{ marginTop: 12 }} onClick={() => setBioOpen((v) => !v)} aria-expanded={bioOpen}>
             {bioOpen ? 'Show less' : 'Read more'}
           </button>
         </section>

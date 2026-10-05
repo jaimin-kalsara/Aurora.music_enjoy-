@@ -17,6 +17,18 @@ import { useLibrary } from './store/library';
 
 const BASE = '/api';
 
+// Read lazily from storage (not via the recommendations store) to avoid a circular import.
+// The server keys listening history by this id; without it every browser on a machine shares one profile.
+function sessionHeaders(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem('aurora.recommendations');
+    const id = raw ? (JSON.parse(raw)?.state?.sessionId as string | undefined) : undefined;
+    return id ? { 'x-session-id': id } : {};
+  } catch {
+    return {};
+  }
+}
+
 class ApiError extends Error {
   status: number;
   constructor(message: string, status: number) {
@@ -30,7 +42,7 @@ async function get<T>(path: string, params: Record<string, string | number | und
   const languages = useLibrary.getState().settings.languages;
   url.searchParams.set('lang', languages);
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== '') url.searchParams.set(k, String(v));
-  const res = await fetch(url.toString(), { signal });
+  const res = await fetch(url.toString(), { signal, headers: sessionHeaders() });
   if (!res.ok) {
     let message = `Request failed (${res.status})`;
     try {
@@ -50,7 +62,7 @@ async function post<T>(path: string, body: Record<string, unknown>, signal?: Abo
   url.searchParams.set('lang', languages);
   const res = await fetch(url.toString(), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...sessionHeaders() },
     body: JSON.stringify(body),
     signal,
   });

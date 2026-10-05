@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { Song } from '../types';
 import { usePlayer, type PlayContext } from '../store/player';
 import { useLibrary } from '../store/library';
+import { useToggleLike } from '../hooks/useToggleLike';
 import { formatTime } from '../utils/format';
 import { Img } from './Img';
 import { Heart, Pause, Play, Plus, Queue as QueueIcon } from './Icons';
@@ -27,7 +29,11 @@ export function Equalizer({ paused = false }: { paused?: boolean }) {
   );
 }
 
+// Liked Songs can grow into the thousands; render in pages so a long list opens instantly.
+const PAGE = 200;
+
 export function SongList({ songs, context, showAlbum = true, showArt = true, showHeader = true, numbered = true }: Props) {
+  const [limit, setLimit] = useState(PAGE);
   const play = usePlayer((s) => s.play);
   const toggle = usePlayer((s) => s.toggle);
   const playing = usePlayer((s) => s.playing);
@@ -35,11 +41,11 @@ export function SongList({ songs, context, showAlbum = true, showArt = true, sho
   const enqueue = usePlayer((s) => s.enqueue);
   const playNext = usePlayer((s) => s.playNext);
   const liked = useLibrary((s) => s.liked);
-  const toggleLike = useLibrary((s) => s.toggleLike);
+  const toggleLike = useToggleLike();
 
   const onRow = (song: Song, i: number) => {
     if (!song.streams) {
-      toast('This track is not available for streaming', 'error');
+      toast('This track isn’t available to stream', 'error');
       return;
     }
     if (song.id === currentId) toggle();
@@ -47,9 +53,9 @@ export function SongList({ songs, context, showAlbum = true, showArt = true, sho
   };
 
   return (
-    <div className={`song-list ${showAlbum ? '' : 'compact'}`}>
+    <div className={`song-list ${showAlbum ? '' : 'compact'} ${showArt ? 'with-art' : ''}`}>
       {showHeader && (
-        <div className="song-head">
+        <div className="song-head" aria-hidden>
           <span style={{ textAlign: 'center' }}>#</span>
           <span>Title</span>
           {showAlbum && <span className="song-album">Album</span>}
@@ -57,18 +63,20 @@ export function SongList({ songs, context, showAlbum = true, showArt = true, sho
           <span />
         </div>
       )}
-      {songs.map((song, i) => {
+      {songs.slice(0, limit).map((song, i) => {
         const active = song.id === currentId;
         const isLiked = Boolean(liked[song.id]);
         return (
           <div
             key={`${song.id}-${i}`}
-            className={`song-row ${active ? 'active' : ''}`}
+            className={`song-row ${active ? 'active' : ''} ${active && playing ? 'playing' : ''} ${song.streams ? '' : 'unavailable'}`}
             onClick={() => onRow(song, i)}
-            onDoubleClick={() => play(songs, i, context)}
             role="button"
             tabIndex={0}
+            aria-label={`${active && playing ? 'Pause' : 'Play'} ${song.title} by ${song.artistNames || song.subtitle}`}
+            aria-current={active || undefined}
             onKeyDown={(e) => {
+              if (e.target !== e.currentTarget) return;
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
                 onRow(song, i);
@@ -77,23 +85,31 @@ export function SongList({ songs, context, showAlbum = true, showArt = true, sho
           >
             <div className="song-idx">
               {showArt ? <Img src={song.image} alt="" /> : <span className="num">{numbered ? i + 1 : ''}</span>}
-              <span className="hover-play">
-                {active && playing ? <Equalizer /> : active ? <Play size={18} /> : <Play size={18} />}
+              <span className="song-overlay" aria-hidden>
+                <span className="ov-eq">
+                  <Equalizer />
+                </span>
+                <span className="ov-icon">{active && playing ? <Pause size={16} /> : <Play size={16} />}</span>
               </span>
-              {!showArt && active && playing && <span className="hover-play" style={{ opacity: 1, background: 'none' }}><Equalizer /></span>}
             </div>
             <div className="song-main">
-              <div className="song-title truncate">
-                <span className="truncate">{song.title}</span>
-                {song.explicit && <span className="badge-e">E</span>}
+              <div className="song-title">
+                <span className="truncate" dir="auto" title={song.title}>
+                  {song.title}
+                </span>
+                {song.explicit && (
+                  <span className="badge-e" title="Explicit">
+                    E
+                  </span>
+                )}
               </div>
-              <div className="song-artists truncate">
+              <div className="song-artists truncate" dir="auto">
                 {song.artists.length
                   ? song.artists.slice(0, 3).map((a, k) => (
                       <span key={`${a.id}-${k}`}>
                         {k > 0 && ', '}
                         {a.id ? (
-                          <Link to={`/artist/${a.id}`} onClick={(e) => e.stopPropagation()}>
+                          <Link to={`/artist/${a.id}`} onClick={(e) => e.stopPropagation()} tabIndex={-1}>
                             {a.name}
                           </Link>
                         ) : (
@@ -107,7 +123,7 @@ export function SongList({ songs, context, showAlbum = true, showArt = true, sho
             {showAlbum && (
               <div className="song-album truncate">
                 {song.album.id ? (
-                  <Link to={`/album/${song.album.id}`} onClick={(e) => e.stopPropagation()}>
+                  <Link to={`/album/${song.album.id}`} onClick={(e) => e.stopPropagation()} tabIndex={-1}>
                     {song.album.name}
                   </Link>
                 ) : (
@@ -116,26 +132,30 @@ export function SongList({ songs, context, showAlbum = true, showArt = true, sho
               </div>
             )}
             <div className="song-dur">
-              {song.streams?.highBitrate === 320 && <span className="dim" style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.04em' }}>HQ</span>}
+              {song.streams?.highBitrate === 320 && (
+                <span className="hq" title="320 kbps available">
+                  HQ
+                </span>
+              )}
               {formatTime(song.duration)}
             </div>
-            <div className={`song-actions ${isLiked ? 'always' : ''}`}>
+            <div className="song-actions">
               <button
-                className={`icon-btn sm ${isLiked ? 'on' : ''}`}
-                aria-label={isLiked ? 'Remove from liked songs' : 'Add to liked songs'}
+                className={`icon-btn sm ${isLiked ? 'liked' : ''}`}
+                aria-label={isLiked ? `Remove ${song.title} from Liked Songs` : `Add ${song.title} to Liked Songs`}
+                aria-pressed={isLiked}
                 onClick={(e) => {
                   e.stopPropagation();
                   toggleLike(song);
-                  toast(isLiked ? 'Removed from Liked Songs' : 'Added to Liked Songs');
                 }}
-                style={isLiked ? { color: '#fff' } : undefined}
               >
                 <Heart size={17} filled={isLiked} />
               </button>
               <button
-                className="icon-btn sm"
-                aria-label="Play next"
+                className="icon-btn sm play-next"
+                aria-label={`Play ${song.title} next`}
                 title="Play next"
+                disabled={!song.streams}
                 onClick={(e) => {
                   e.stopPropagation();
                   playNext(song);
@@ -146,8 +166,9 @@ export function SongList({ songs, context, showAlbum = true, showArt = true, sho
               </button>
               <button
                 className="icon-btn sm"
-                aria-label="Add to queue"
+                aria-label={`Add ${song.title} to queue`}
                 title="Add to queue"
+                disabled={!song.streams}
                 onClick={(e) => {
                   e.stopPropagation();
                   enqueue(song);
@@ -157,11 +178,16 @@ export function SongList({ songs, context, showAlbum = true, showArt = true, sho
                 <QueueIcon size={17} />
               </button>
             </div>
-            {active && <span className="sr-only">{playing ? 'Now playing' : 'Paused'}</span>}
-            {active && !playing && <span style={{ display: 'none' }}><Pause /></span>}
           </div>
         );
       })}
+      {songs.length > limit && (
+        <div className="list-more">
+          <button className="chip" onClick={() => setLimit((l) => l + PAGE)}>
+            Show {Math.min(PAGE, songs.length - limit).toLocaleString()} more of {(songs.length - limit).toLocaleString()}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

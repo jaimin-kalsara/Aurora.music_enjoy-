@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { clamp } from '../utils/format';
 
 interface Props {
@@ -8,14 +8,25 @@ interface Props {
   onChange?: (v: number) => void;
   onCommit?: (v: number) => void;
   ariaLabel: string;
+  valueText?: (v: number) => string;
+  disabled?: boolean;
   className?: string;
 }
 
-/** Pointer-driven slider used for the timeline and the volume control. */
-export function Slider({ value, max, buffered = 0, onChange, onCommit, ariaLabel, className = '' }: Props) {
+/** Pointer-driven slider used for the timeline and the volume control. Tracks the pointer 1:1 while dragging. */
+export function Slider({ value, max, buffered = 0, onChange, onCommit, ariaLabel, valueText, disabled = false, className = '' }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
   const [dragValue, setDragValue] = useState(value);
+  // Callbacks are recreated on every render (the timeline re-renders several times a second);
+  // read them through refs so an in-progress drag never re-subscribes its listeners.
+  const onChangeRef = useRef(onChange);
+  const onCommitRef = useRef(onCommit);
+  useLayoutEffect(() => {
+    onChangeRef.current = onChange;
+    onCommitRef.current = onCommit;
+  });
+
   const safeMax = max > 0 ? max : 1;
   const shown = dragging ? dragValue : value;
   const pct = clamp((shown / safeMax) * 100, 0, 100);
@@ -26,8 +37,7 @@ export function Slider({ value, max, buffered = 0, onChange, onCommit, ariaLabel
       const el = ref.current;
       if (!el) return 0;
       const rect = el.getBoundingClientRect();
-      const ratio = clamp((clientX - rect.left) / rect.width, 0, 1);
-      return ratio * safeMax;
+      return clamp((clientX - rect.left) / rect.width, 0, 1) * safeMax;
     },
     [safeMax],
   );
@@ -37,47 +47,61 @@ export function Slider({ value, max, buffered = 0, onChange, onCommit, ariaLabel
     const move = (e: PointerEvent) => {
       const v = valueFromEvent(e.clientX);
       setDragValue(v);
-      onChange?.(v);
+      onChangeRef.current?.(v);
     };
-    const up = (e: PointerEvent) => {
+    const end = (e: PointerEvent) => {
       const v = valueFromEvent(e.clientX);
       setDragging(false);
-      onCommit?.(v);
+      onCommitRef.current?.(v);
     };
+    const cancel = () => setDragging(false);
     window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up, { once: true });
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', cancel);
     return () => {
       window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', cancel);
     };
-  }, [dragging, valueFromEvent, onChange, onCommit]);
+  }, [dragging, valueFromEvent]);
+
+  const commitKey = (v: number) => {
+    const next = clamp(v, 0, safeMax);
+    onChangeRef.current?.(next);
+    onCommitRef.current?.(next);
+  };
 
   return (
     <div
       ref={ref}
       className={`slider ${dragging ? 'dragging' : ''} ${className}`}
       role="slider"
-      tabIndex={0}
+      tabIndex={disabled ? -1 : 0}
       aria-label={ariaLabel}
       aria-valuemin={0}
       aria-valuemax={Math.round(safeMax)}
       aria-valuenow={Math.round(shown)}
+      aria-valuetext={valueText?.(shown)}
+      aria-disabled={disabled || undefined}
+      style={disabled ? { pointerEvents: 'none', opacity: 0.5 } : undefined}
       onPointerDown={(e) => {
+        if (e.button !== 0) return;
         e.preventDefault();
+        e.stopPropagation();
         const v = valueFromEvent(e.clientX);
         setDragValue(v);
         setDragging(true);
-        onChange?.(v);
+        onChangeRef.current?.(v);
       }}
+      onClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
         const step = safeMax / 20;
-        if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
-          e.preventDefault();
-          onCommit?.(clamp(value + step, 0, safeMax));
-        } else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
-          e.preventDefault();
-          onCommit?.(clamp(value - step, 0, safeMax));
-        }
+        if (e.key === 'ArrowRight' || e.key === 'ArrowUp') commitKey(value + step);
+        else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') commitKey(value - step);
+        else if (e.key === 'Home') commitKey(0);
+        else if (e.key === 'End') commitKey(safeMax);
+        else return;
+        e.preventDefault();
       }}
     >
       <div className="slider-track">

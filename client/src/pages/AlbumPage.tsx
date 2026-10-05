@@ -6,7 +6,7 @@ import { Hero } from '../components/Hero';
 import { SongList } from '../components/SongList';
 import { HeroSkeleton, ListSkeleton } from '../components/Skeleton';
 import { Pause, Play, Shuffle, Queue as QueueIcon } from '../components/Icons';
-import { formatDurationLong } from '../utils/format';
+import { formatDurationLong, songCount } from '../utils/format';
 import { toast } from '../store/toast';
 
 export function AlbumPage() {
@@ -23,9 +23,9 @@ export function AlbumPage() {
   if (error) {
     return (
       <div className="page">
-        <div className="error-box">
+        <div className="error-box" role="alert">
           <span>{error}</span>
-          <button className="btn btn-ghost btn-sm" onClick={refetch}>Retry</button>
+          <button className="btn btn-ghost glass clear btn-sm" onClick={refetch}>Try again</button>
         </div>
       </div>
     );
@@ -58,33 +58,29 @@ export function AlbumPage() {
             ? data.artists.slice(0, 3).map((a, i) => (
                 <span key={`${a.id}-${i}`}>
                   {i > 0 && ', '}
-                  {a.id ? <Link to={`/artist/${a.id}`} style={{ fontWeight: 600, color: 'var(--text)' }}>{a.name}</Link> : a.name}
+                  {a.id ? <Link to={`/artist/${a.id}`}>{a.name}</Link> : a.name}
                 </span>
               ))
             : data.subtitle
         }
-        stats={[data.year || null, `${songs.length} songs`, formatDurationLong(total) || null, data.language ? data.language[0].toUpperCase() + data.language.slice(1) : null].filter(Boolean).join(' · ')}
+        stats={[data.year || null, songCount(songs.length), formatDurationLong(total) || null, data.language ? data.language[0].toUpperCase() + data.language.slice(1) : null].filter(Boolean).join(' · ')}
         actions={
           <>
             <button className="btn btn-primary" onClick={() => (isCurrent ? toggle() : start(false))} disabled={!songs.length}>
               {isCurrent && playing ? <Pause size={18} /> : <Play size={18} />}
               {isCurrent && playing ? 'Pause' : 'Play'}
             </button>
-            <button className="btn btn-ghost" onClick={() => start(true)} disabled={!songs.length}>
+            <button className="btn btn-ghost glass clear" onClick={() => start(true)} disabled={!songs.length}>
               <Shuffle size={18} /> Shuffle
             </button>
-            <button className="btn btn-ghost" onClick={() => { enqueue(songs); toast('Album added to queue'); }} disabled={!songs.length} aria-label="Add album to queue">
+            <button className="btn btn-ghost glass clear" onClick={() => { enqueue(songs); toast('Album added to queue'); }} disabled={!songs.length} aria-label="Add album to queue">
               <QueueIcon size={18} /> Queue
             </button>
           </>
         }
       />
       <SongList songs={data.songs} context={context} showAlbum={false} showArt={false} />
-      {data.songs[0]?.label && (
-        <p className="dim" style={{ fontSize: 12, padding: '20px 14px' }}>
-          ℗ {data.songs[0].label}
-        </p>
-      )}
+      {data.songs[0]?.label && <p className="footnote">℗ {data.songs[0].label}</p>}
     </div>
   );
 }

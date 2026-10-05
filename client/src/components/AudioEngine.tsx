@@ -1,9 +1,13 @@
 import { useEffect, useRef } from 'react';
 import { usePlayer, useCurrentSong } from '../store/player';
 import { useLibrary } from '../store/library';
+import { useRecommendations } from '../store/recommendations';
 import { api } from '../api';
 import { toast } from '../store/toast';
 import type { Quality, Song } from '../types';
+
+/** Toasts quote the title; keep long ones from turning a status message into a paragraph. */
+const short = (title: string) => (title.length > 42 ? `${title.slice(0, 40).trimEnd()}…` : title);
 
 export function pickStream(song: Song, quality: Quality): string | null {
   if (!song.streams) return null;
@@ -70,16 +74,21 @@ export function AudioEngine() {
     };
     const onError = () => {
       const current = store().queue[store().index];
-      if (!current) return;
-      failures.current += 1;
+      if (!current || !a.getAttribute('src')) return;
       store().setBuffering(false);
+      // While paused, report it but stay put: skipping would call next(), which starts playback on its own.
+      if (!store().playing) {
+        toast(`Couldn't load “${short(current.title)}”`, 'error');
+        return;
+      }
+      failures.current += 1;
       if (failures.current > 3) {
         store().setPlaying(false);
         toast('Playback stopped: too many failed tracks', 'error');
         failures.current = 0;
         return;
       }
-      toast(`Couldn't play “${current.title}”, skipping`, 'error');
+      toast(`Couldn't play “${short(current.title)}”, skipping`, 'error');
       setTimeout(() => store().next(), 400);
     };
     a.addEventListener('timeupdate', onTime);
@@ -181,6 +190,13 @@ export function AudioEngine() {
     if (!sameSong) {
       lastSongId.current = song.id;
       useLibrary.getState().addRecent(song);
+      const ctx = usePlayer.getState().context;
+      void useRecommendations.getState().recordPlay(song.id, {
+        language: song.language,
+        artistIds: song.artists.map((a) => a.id).filter(Boolean),
+        context: ctx?.type,
+        mood: ctx?.type === 'mood' ? ctx.id : undefined,
+      });
       document.title = `${song.title} · ${song.artistNames || song.subtitle} — Aurora`;
       if ('mediaSession' in navigator) {
         navigator.mediaSession.metadata = new MediaMetadata({
