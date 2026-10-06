@@ -1,21 +1,26 @@
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useToast } from '../store/toast';
 
 export function Toasts() {
   const toasts = useToast((s) => s.toasts);
+  const reduceMotion = useReducedMotion();
+  // Enter from below, leave the same way; a spring so a burst of toasts retargets instead of restarting.
+  // y/scale (not a transform string) so they compose with the layout animation when the stack reflows.
+  const from = reduceMotion ? { opacity: 0 } : { opacity: 0, y: 14, scale: 0.97 };
   return (
-    <div className="toast-wrap" aria-live="polite">
-      <AnimatePresence>
+    <div className="toast-wrap" role="status" aria-live="polite">
+      <AnimatePresence initial={false}>
         {toasts.map((t) => (
           <motion.div
             key={t.id}
-            className={`toast ${t.kind}`}
-            initial={{ opacity: 0, y: 16, scale: 0.96 }}
+            layout="position"
+            className={`toast glass ${t.kind}`}
+            initial={from}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 8, scale: 0.98 }}
-            transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+            exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 8, scale: 0.98, transition: { duration: 0.18 } }}
+            transition={{ type: 'spring', duration: 0.4, bounce: 0 }}
           >
-            {t.message}
+            <span className="toast-text">{t.message}</span>
           </motion.div>
         ))}
       </AnimatePresence>

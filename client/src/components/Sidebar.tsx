@@ -1,6 +1,8 @@
 import { NavLink, useLocation } from 'react-router-dom';
-import { Compass, Heart, Home, Library, Note, Search, Settings, Sparkle } from './Icons';
+import { motion, useReducedMotion } from 'framer-motion';
+import { Compass, Heart, Home, Library, Note, Settings, Sparkle } from './Icons';
 import { useLibrary } from '../store/library';
+import { SPRING_LIVELY } from '../utils/motion';
 
 const nav = [
   { to: '/', label: 'Home', icon: Home, end: true },
@@ -12,30 +14,40 @@ const nav = [
 export function Sidebar() {
   const likedCount = useLibrary((s) => s.likedOrder.length);
   const location = useLocation();
+  const likedTab = location.pathname === '/library' && new URLSearchParams(location.search).get('tab') === 'liked';
+
   return (
-    <aside className="sidebar">
+    <aside className="sidebar glass" aria-label="Main">
       <div className="brand">
-        <span className="brand-mark">
+        <span className="brand-mark" aria-hidden>
           <Note size={18} />
         </span>
         Aurora
       </div>
-      {nav.map(({ to, label, icon: Icon, end }) => (
-        <NavLink key={to} to={to} end={end} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
-          <Icon size={20} />
-          {label}
+      <nav style={{ display: 'contents' }}>
+        {nav.map(({ to, label, icon: Icon, end }) => (
+          <NavLink
+            key={to}
+            to={to}
+            end={end}
+            // "Liked Songs" has its own entry; don't light up Library at the same time.
+            className={({ isActive }) => `nav-item ${isActive && !(to === '/library' && likedTab) ? 'active' : ''}`}
+          >
+            <Icon size={20} />
+            {label}
+          </NavLink>
+        ))}
+        <div className="nav-label">Your music</div>
+        <NavLink to="/library?tab=liked" className={() => `nav-item ${likedTab ? 'active' : ''}`} aria-current={likedTab ? 'page' : undefined}>
+          <Heart size={20} />
+          Liked Songs
+          {likedCount > 0 && <span className="nav-count">{likedCount.toLocaleString()}</span>}
         </NavLink>
-      ))}
-      <div className="nav-label">Your music</div>
-      <NavLink to="/library?tab=liked" className={({ isActive }) => `nav-item ${isActive && location.search.includes('liked') ? 'active' : ''}`}>
-        <Heart size={20} />
-        Liked Songs
-        {likedCount > 0 && <span className="nav-count">{likedCount}</span>}
-      </NavLink>
-      <NavLink to="/settings" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
-        <Settings size={20} />
-        Settings
-      </NavLink>
+        <NavLink to="/settings" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <Settings size={20} />
+          Settings
+        </NavLink>
+      </nav>
       <div className="sidebar-footer">
         Powered by YouTube Music.
         <br />
@@ -45,15 +57,20 @@ export function Sidebar() {
   );
 }
 
-/** Mobile bottom navigation (glass). */
 export function TabBar() {
-  const tabs = [nav[0], nav[1], { to: '/search', label: 'Search', icon: Search }, nav[2], nav[3]];
+  const reduceMotion = useReducedMotion();
   return (
-    <nav className="tabbar glass" aria-label="Primary">
-      {tabs.map(({ to, label, icon: Icon, end }) => (
+    <nav className="tabbar glass" aria-label="Main">
+      {nav.map(({ to, label, icon: Icon, end }) => (
         <NavLink key={to} to={to} end={end} className={({ isActive }) => (isActive ? 'active' : '')}>
-          <Icon size={22} />
-          <span>{label}</span>
+          {({ isActive }) => (
+            <>
+              {/* The selection is a lens that glides between tabs, like the iOS tab bar. */}
+              {isActive && <motion.span layoutId="tab-pill" className="tab-pill" transition={reduceMotion ? { duration: 0 } : SPRING_LIVELY} />}
+              <Icon size={22} />
+              <span>{label}</span>
+            </>
+          )}
         </NavLink>
       ))}
     </nav>

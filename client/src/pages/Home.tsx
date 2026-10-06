@@ -1,16 +1,16 @@
-import { Link, useNavigate } from 'react-router-dom';
 import { useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { useQuery } from '../hooks/useQuery';
 import { Shelf } from '../components/Shelf';
+import { CardShell } from '../components/Card';
 import { ShelfSkeleton } from '../components/Skeleton';
-import { Img } from '../components/Img';
 import { useLibrary } from '../store/library';
 import { usePlayer } from '../store/player';
 import { useRecommendations } from '../store/recommendations';
-import type { DailyMix, Mood, Song } from '../types';
-import { Pause, Play } from '../components/Icons';
+import type { DailyMix, Mood } from '../types';
+import { songCount } from '../utils/format';
+import { ChevronRight } from '../components/Icons';
 
 function greeting() {
   const h = new Date().getHours();
@@ -21,146 +21,123 @@ function greeting() {
   return 'Good night';
 }
 
-const rise = (i = 0) => ({
-  initial: { opacity: 0, y: 14 },
-  animate: { opacity: 1, y: 0 },
-  transition: { duration: 0.45, delay: Math.min(i * 0.05, 0.35), ease: [0.22, 1, 0.36, 1] as [number, number, number, number] },
-});
-
 function MoodStrip({ moods }: { moods: Mood[] }) {
   return (
-    <div className="chips chips-scroll">
-      {moods.map((m) => (
+    <div className="chips mood-strip">
+      {moods.slice(0, 8).map((m) => (
         <Link key={m.key} to={`/moods/${m.key}`} className="chip">
-          <span aria-hidden>{m.emoji}</span>
+          <span className="chip-emoji" aria-hidden>
+            {m.emoji}
+          </span>
           {m.title}
         </Link>
       ))}
+      <Link to="/moods" className="chip">
+        All moods
+        <ChevronRight size={15} />
+      </Link>
     </div>
   );
 }
 
-/** Mosaic tile that plays a personalized mix. */
-function MixTile({ mix, onOpen }: { mix: DailyMix; onOpen: () => void }) {
+function mixArtists(mix: DailyMix): string {
+  const names: string[] = [];
+  for (const t of mix.tracks) {
+    for (const a of t.artists) if (a.name && !names.includes(a.name)) names.push(a.name);
+    if (names.length >= 3) break;
+  }
+  return names.length ? `${names.slice(0, 3).join(', ')} and more` : songCount(mix.tracks.length);
+}
+
+function MixCard({ mix }: { mix: DailyMix }) {
+  const navigate = useNavigate();
   const play = usePlayer((s) => s.play);
   const toggle = usePlayer((s) => s.toggle);
-  const isCurrent = usePlayer((s) => s.context?.type === 'radio' && s.context.id === `mix:${mix.key}`);
   const playing = usePlayer((s) => s.playing);
-  const art = mix.tracks.slice(0, 4);
+  const isCurrent = usePlayer((s) => s.context?.type === 'radio' && s.context.id === `mix:${mix.key}`);
   return (
-    <div className="mix-tile" role="button" tabIndex={0} onClick={onOpen} onKeyDown={(e) => e.key === 'Enter' && onOpen()}>
-      <div className={`mix-art n${art.length}`}>
-        {art.map((t) => (
-          <Img key={t.id} src={t.image} alt="" />
-        ))}
-      </div>
-      <div className="mix-meta">
-        <div className="mix-title truncate">{mix.title}</div>
-        <div className="mix-sub truncate">{mix.tracks.slice(0, 3).map((t) => t.artists[0]?.name || t.subtitle).join(', ')}</div>
-      </div>
-      <button
-        className="mix-play"
-        aria-label={isCurrent && playing ? `Pause ${mix.title}` : `Play ${mix.title}`}
-        onClick={(e) => {
-          e.stopPropagation();
-          if (isCurrent) toggle();
-          else play(mix.tracks, 0, { type: 'radio', id: `mix:${mix.key}`, title: mix.title });
-        }}
-      >
-        {isCurrent && playing ? <Pause size={18} /> : <Play size={18} />}
-      </button>
-    </div>
-  );
-}
-
-/** Compact "quick picks" grid of recently played songs (Apple-style). */
-function QuickPicks({ songs }: { songs: Song[] }) {
-  const play = usePlayer((s) => s.play);
-  const currentId = usePlayer((s) => s.queue[s.index]?.id);
-  return (
-    <div className="quick-grid">
-      {songs.slice(0, 8).map((song, i) => (
-        <button
-          key={song.id}
-          className={`quick-item ${currentId === song.id ? 'active' : ''}`}
-          onClick={() => play(songs, i, { type: 'library', title: 'Recently played' })}
-        >
-          <Img src={song.image} alt="" />
-          <span className="truncate">{song.title}</span>
-        </button>
-      ))}
-    </div>
+    <CardShell
+      title={mix.title}
+      subtitle={mixArtists(mix)}
+      image={mix.tracks[0]?.image ?? ''}
+      artClass="mix"
+      badge={<span className="card-badge">{mix.title}</span>}
+      isPlaying={isCurrent && playing}
+      onOpen={() => navigate(`/mix/${mix.key}`)}
+      onPlay={() => (isCurrent ? toggle() : play(mix.tracks, 0, { type: 'radio', id: `mix:${mix.key}`, title: mix.title }))}
+    />
   );
 }
 
 export function Home() {
-  const navigate = useNavigate();
   const languages = useLibrary((s) => s.settings.languages);
   const home = useQuery(`home:${languages}`, (signal) => api.home(signal));
   const moods = useQuery('moods', () => api.moods());
   const recent = useLibrary((s) => s.recent);
+  const play = usePlayer((s) => s.play);
+  const toggle = usePlayer((s) => s.toggle);
+  const playing = usePlayer((s) => s.playing);
+  const currentId = usePlayer((s) => s.queue[s.index]?.id);
 
   const forYou = useRecommendations((s) => s.forYou);
   const discoverWeekly = useRecommendations((s) => s.discoverWeekly);
   const dailyMixes = useRecommendations((s) => s.dailyMixes);
   const loading = useRecommendations((s) => s.loading);
-  const fetchAll = useRecommendations((s) => s.fetchAll);
 
+  // The store refetches at most every 10 minutes, so shelves don't reshuffle on every visit.
+  const fetchAll = useRecommendations((s) => s.fetchAll);
   useEffect(() => {
     void fetchAll();
   }, [fetchAll, languages]);
 
+  const weekly = discoverWeekly?.tracks ?? [];
+  const weeklySub = discoverWeekly?.updatedAt
+    ? `Updated ${new Date(discoverWeekly.updatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} · New music picked for you`
+    : 'Fresh discoveries every Monday';
+  const recentCtx = { type: 'library' as const, id: 'recent', title: 'Recently played' };
+
   return (
     <div className="page">
-      <motion.div className="page-title" {...rise()}>
+      <div className="page-title">
         <h1>{greeting()}</h1>
-        <p className="lead">Fresh releases, charts, and mixes tuned to how you feel.</p>
+        <p className="lede">Fresh releases, charts, and mixes tuned to how you feel.</p>
         {moods.data && <MoodStrip moods={moods.data.moods} />}
-      </motion.div>
+      </div>
 
-      {recent.length >= 4 && (
-        <motion.section className="shelf" {...rise(1)}>
-          <div className="shelf-head">
-            <h2>Jump back in</h2>
-          </div>
-          <QuickPicks songs={recent} />
-        </motion.section>
+      {forYou.length > 0 ? (
+        <Shelf title="For You" subtitle="Based on your listening history" items={forYou.slice(0, 12)} seeAllTo="/recommendations/for-you" />
+      ) : (
+        loading.forYou && <ShelfSkeleton />
       )}
 
-      {(dailyMixes.length > 0 || loading.dailyMixes) && (
-        <motion.section className="shelf" {...rise(2)}>
-          <div className="shelf-head">
-            <div>
-              <h2>Made for you</h2>
-              <div className="sub">Daily mixes that learn from what you play</div>
-            </div>
-          </div>
-          {dailyMixes.length ? (
-            <div className="mix-grid">
-              {dailyMixes.slice(0, 6).map((mix) => (
-                <MixTile key={mix.key} mix={mix} onOpen={() => navigate(`/mix/${encodeURIComponent(mix.key)}`)} />
-              ))}
-            </div>
-          ) : (
-            <div className="mix-grid">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="skeleton" style={{ height: 96, borderRadius: 18 }} />
-              ))}
-            </div>
-          )}
-        </motion.section>
+      {weekly.length > 0 && <Shelf title="Discover Weekly" subtitle={weeklySub} items={weekly.slice(0, 12)} seeAllTo="/recommendations/discover-weekly" />}
+
+      {dailyMixes.length > 0 && (
+        <Shelf title="Daily Mixes" subtitle="Built from the moods you play most">
+          {dailyMixes.map((mix) => (
+            <MixCard key={mix.key} mix={mix} />
+          ))}
+        </Shelf>
       )}
 
-      {forYou.length > 0 && (
-        <motion.div {...rise(3)}>
-          <Shelf title="For you" subtitle="Based on your listening" items={forYou.slice(0, 20)} seeAllTo="/mix/for-you" />
-        </motion.div>
-      )}
-
-      {discoverWeekly && discoverWeekly.tracks.length > 0 && (
-        <motion.div {...rise(4)}>
-          <Shelf title="Discover weekly" subtitle="New artists picked for you, refreshed every week" items={discoverWeekly.tracks.slice(0, 20)} seeAllTo="/mix/discover-weekly" />
-        </motion.div>
+      {recent.length > 0 && (
+        <Shelf title="Continue listening" subtitle="Pick up where you left off">
+          {recent.slice(0, 12).map((song, i) => {
+            const isCurrent = currentId === song.id;
+            return (
+              <CardShell
+                key={song.id}
+                title={song.title}
+                subtitle={song.artistNames || song.subtitle}
+                image={song.image}
+                size="sm"
+                isPlaying={isCurrent && playing}
+                onOpen={() => (isCurrent ? toggle() : play(recent, i, recentCtx))}
+                onPlay={() => (isCurrent ? toggle() : play(recent, i, recentCtx))}
+              />
+            );
+          })}
+        </Shelf>
       )}
 
       {home.loading && !home.data && (
@@ -171,22 +148,21 @@ export function Home() {
         </>
       )}
       {home.error && (
-        <div className="error-box">
-          <span>Couldn't load the home feed: {home.error}</span>
-          <button className="btn btn-ghost btn-sm" onClick={home.refetch}>
-            Retry
+        <div className="error-box" role="alert">
+          <span>Couldn’t load the home feed. The music server isn’t responding; try again in a moment.</span>
+          <button className="btn btn-ghost glass clear btn-sm" onClick={home.refetch}>
+            Try again
           </button>
         </div>
       )}
-      {home.data?.sections.map((section, i) => (
-        <motion.div key={section.id} {...rise(i + 4)}>
-          <Shelf
-            title={section.title}
-            items={section.items}
-            size={section.kind === 'artist' ? 'sm' : 'md'}
-            seeAllTo={section.id === 'new-releases' ? '/explore#new' : section.id === 'charts' ? '/explore#charts' : undefined}
-          />
-        </motion.div>
+      {home.data?.sections.map((section) => (
+        <Shelf
+          key={section.id}
+          title={section.title}
+          items={section.items}
+          size={section.kind === 'artist' ? 'sm' : 'md'}
+          seeAllTo={section.id === 'new-releases' ? '/explore#new' : section.id === 'charts' ? '/explore#charts' : undefined}
+        />
       ))}
     </div>
   );

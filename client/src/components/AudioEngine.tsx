@@ -16,6 +16,9 @@ const supportsOpus = (() => {
 })();
 export const STREAM_FORMAT: 'webm' | 'm4a' = supportsOpus ? 'webm' : 'm4a';
 
+/** Toasts quote the title; keep long ones from turning a status message into a paragraph. */
+const short = (title: string) => (title.length > 42 ? `${title.slice(0, 40).trimEnd()}…` : title);
+
 export function pickStream(song: Song, quality: Quality): string | null {
   if (!song.streams) return null;
   const base = quality === 'high' ? song.streams.high : quality === 'medium' ? song.streams.medium : song.streams.low;
@@ -87,7 +90,7 @@ export function AudioEngine() {
       failures.current = 0;
       return;
     }
-    toast(`Couldn't play “${title}”, skipping`, 'error');
+    toast(`Couldn't play “${short(title)}”, skipping`, 'error');
     setTimeout(() => usePlayer.getState().next(), 400);
   });
 
@@ -252,6 +255,10 @@ export function AudioEngine() {
         serverFailures.current = 0;
         rememberEmbedMode();
         setEmbed(true);
+        return;
+      }
+      if (!store().playing) {
+        toast(`Couldn't load “${short(current.title)}”`, 'error');
         return;
       }
       skipFailed(current.title);
@@ -440,6 +447,11 @@ export function AudioEngine() {
       });
     } else if (playing) {
       if (!a.src) return;
+      if (a.error) {
+        resumeAt.current = a.currentTime || usePlayer.getState().currentTime || null;
+        switching.current = true;
+        a.load();
+      }
       a.play().catch((err: unknown) => {
         if (err instanceof DOMException && err.name === 'NotAllowedError') {
           usePlayer.getState().setPlaying(false);

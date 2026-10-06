@@ -1,9 +1,10 @@
-import { memo } from 'react';
+import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Entity } from '../types';
 import { Img } from './Img';
 import { Play, Pause } from './Icons';
 import { usePlayEntity } from '../hooks/usePlayEntity';
+import { songCount } from '../utils/format';
 import { usePlayer } from '../store/player';
 
 interface Props {
@@ -28,61 +29,92 @@ function subtitleOf(item: Entity): string {
   if (item.type === 'song') return item.artistNames || item.subtitle;
   if (item.type === 'artist') return item.subtitle && item.subtitle !== 'Artist' ? item.subtitle : 'Artist';
   if (item.type === 'album') return [item.kind === 'single' ? 'Single' : null, item.year || null, item.subtitle].filter(Boolean).join(' · ');
-  if (item.type === 'playlist') return item.songCount ? `${item.songCount} songs` : item.subtitle;
+  if (item.type === 'playlist') return item.songCount ? songCount(item.songCount) : item.subtitle;
   return '';
 }
 
-/** Artwork card. Songs play on tap; albums, playlists and artists open their page. */
-export const Card = memo(function Card({ item, size = 'md' }: Props) {
-  const navigate = useNavigate();
-  const { playEntity, busyId } = usePlayEntity();
-  const isCurrent = usePlayer((s) =>
-    item.type === 'song' ? s.queue[s.index]?.id === item.id : Boolean(s.context && s.context.type === item.type && s.context.id === item.id),
-  );
-  const playing = usePlayer((s) => s.playing);
-  const toggle = usePlayer((s) => s.toggle);
+interface ShellProps {
+  title: string;
+  subtitle: string;
+  image: string;
+  round?: boolean;
+  size?: 'md' | 'sm';
+  isPlaying: boolean;
+  busy?: boolean;
+  badge?: ReactNode;
+  artClass?: string;
+  onOpen: () => void;
+  onPlay: () => void;
+}
 
-  const path = item.type === 'song' ? null : entityPath(item);
-
-  const onOpen = () => {
-    if (item.type === 'song') {
-      if (isCurrent) toggle();
-      else void playEntity(item);
-    } else if (path) navigate(path);
-  };
-  const onPlay = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (isCurrent) toggle();
-    else void playEntity(item);
-  };
-
+/** The visual card shared by entities, recent songs and mixes. */
+export function CardShell({ title, subtitle, image, round, size = 'md', isPlaying, busy, badge, artClass = '', onOpen, onPlay }: ShellProps) {
   return (
     <div
-      className={`card ${item.type === 'artist' ? 'card--round' : ''} ${size === 'sm' ? 'sm' : ''} ${isCurrent ? 'current' : ''}`}
+      className={`card ${round ? 'card--round' : ''} ${size === 'sm' ? 'sm' : ''}`}
       role="button"
       tabIndex={0}
+      aria-label={`${title}${subtitle ? `, ${subtitle}` : ''}`}
       onClick={onOpen}
       onKeyDown={(e) => {
-        if (e.key === 'Enter') onOpen();
+        if (e.target !== e.currentTarget) return;
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onOpen();
+        }
       }}
     >
-      <div className="card-art">
-        <Img src={item.image} alt={item.title} />
+      <div className={`card-art ${artClass}`}>
+        <Img src={image} alt="" />
+        {badge}
         <button
-          className={`card-play ${isCurrent && playing ? 'visible' : ''}`}
-          onClick={onPlay}
-          aria-label={isCurrent && playing ? `Pause ${item.title}` : `Play ${item.title}`}
-          disabled={busyId === item.id}
+          className={`card-play glass over-art ${isPlaying ? 'visible' : ''}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onPlay();
+          }}
+          aria-label={isPlaying ? `Pause ${title}` : `Play ${title}`}
+          aria-busy={busy || undefined}
+          disabled={busy}
         >
-          {busyId === item.id ? <span className="spinner light" aria-hidden /> : isCurrent && playing ? <Pause size={20} /> : <Play size={20} />}
+          {busy ? <span className="spinner light" /> : isPlaying ? <Pause size={20} /> : <Play size={20} />}
         </button>
       </div>
       <div className="card-body">
-        <div className="card-title truncate" title={item.title}>
-          {item.title}
+        <div className="card-title truncate" title={title} dir="auto">
+          {title}
         </div>
-        <div className="card-sub truncate">{subtitleOf(item)}</div>
+        <div className="card-sub truncate" dir="auto" title={subtitle}>
+          {subtitle}
+        </div>
       </div>
     </div>
   );
-});
+}
+
+export function Card({ item, size = 'md' }: Props) {
+  const navigate = useNavigate();
+  const { playEntity, busyId } = usePlayEntity();
+  const context = usePlayer((s) => s.context);
+  const playing = usePlayer((s) => s.playing);
+  const currentId = usePlayer((s) => s.queue[s.index]?.id);
+  const toggle = usePlayer((s) => s.toggle);
+
+  const isCurrent = item.type === 'song' ? currentId === item.id : Boolean(context && context.type === item.type && context.id === item.id);
+  const path = item.type === 'song' ? null : entityPath(item);
+
+  // Songs play on tap (like YouTube Music); albums, playlists and artists open their page.
+  return (
+    <CardShell
+      title={item.title}
+      subtitle={subtitleOf(item)}
+      image={item.image}
+      round={item.type === 'artist'}
+      size={size}
+      isPlaying={isCurrent && playing}
+      busy={busyId === item.id}
+      onOpen={() => (path ? navigate(path) : isCurrent ? toggle() : void playEntity(item))}
+      onPlay={() => (isCurrent ? toggle() : void playEntity(item))}
+    />
+  );
+}
