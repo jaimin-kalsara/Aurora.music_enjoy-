@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useRef } from 'react';
+import { useCallback, useRef } from 'react';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
 import { AnimatePresence, MotionConfig, motion, useReducedMotion } from 'framer-motion';
 import { Sidebar, TabBar } from './components/Sidebar';
@@ -21,9 +21,6 @@ import { ArtistPage } from './pages/ArtistPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { CollectionPage } from './pages/CollectionPage';
 import { EASE_OUT } from './utils/motion';
-
-// Dev-only worst-case data switch (?data=worst). The ternary is compiled away in production builds.
-const DataToggle = import.meta.env.DEV ? lazy(() => import('./dev/DataToggle')) : null;
 
 function NotFound() {
   return (
@@ -97,11 +94,6 @@ export default function App() {
         <NowPlaying />
         <Toasts />
         <AudioEngine />
-        {DataToggle && (
-          <Suspense fallback={null}>
-            <DataToggle />
-          </Suspense>
-        )}
       </div>
     </MotionConfig>
   );
