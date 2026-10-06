@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { motion } from 'framer-motion';
 import { api } from '../api';
 import { useQuery } from '../hooks/useQuery';
 import { useLibrary } from '../store/library';
@@ -25,25 +24,32 @@ const TABS: { key: Tab; label: string }[] = [
 
 function TopResult({ item }: { item: Entity }) {
   const navigate = useNavigate();
-  const { playEntity } = usePlayEntity();
+  const { playEntity, busyId } = usePlayEntity();
   const path = entityPath(item);
-  const sub = item.type === 'song' ? `Song · ${item.artistNames}` : item.type === 'artist' ? `Artist · ${item.subtitle}` : item.type === 'album' ? `Album · ${item.subtitle}` : `Playlist · ${item.subtitle}`;
+  const sub = [item.type === 'song' ? 'Song' : item.type === 'artist' ? 'Artist' : item.type === 'album' ? 'Album' : 'Playlist', item.type === 'song' ? item.artistNames : item.subtitle !== 'Artist' ? item.subtitle : '']
+    .filter(Boolean)
+    .join(' · ');
+  const open = () => (path ? navigate(path) : void playEntity(item));
   return (
-    <motion.div
-      className="top-result"
+    <div
+      className="card top-result"
       role="button"
       tabIndex={0}
-      onClick={() => (path && item.type !== 'song' ? navigate(path) : playEntity(item))}
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+      aria-label={`${item.title}, ${sub}`}
+      onClick={open}
+      onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return;
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          open();
+        }
+      }}
     >
-      <div className={`top-result-art ${item.type === 'artist' ? 'round' : ''}`}>
+      <div className={`card-art ${item.type === 'artist' ? 'round' : ''}`}>
         <Img src={item.image} alt="" />
       </div>
       <div style={{ minWidth: 0, flex: 1 }}>
-        <div className="hero-kind">Top result</div>
-        <h2 className="truncate">{item.title}</h2>
+        <h3 className="truncate">{item.title}</h3>
         <div className="muted truncate">{sub}</div>
       </div>
       <button
@@ -53,10 +59,11 @@ function TopResult({ item }: { item: Entity }) {
           void playEntity(item);
         }}
         aria-label={`Play ${item.title}`}
+        disabled={busyId === item.id}
       >
-        <Play size={22} />
+        {busyId === item.id ? <span className="spinner" /> : <Play size={22} />}
       </button>
-    </motion.div>
+    </div>
   );
 }
 
@@ -71,7 +78,7 @@ function FilteredResults({ q, tab }: { q: string; tab: Exclude<Tab, 'all'> }) {
     return bucket;
   });
   const items = page === 1 && data ? data.results : acc;
-  if (error) return <div className="error-box">{error}</div>;
+  if (error) return <div className="error-box" role="alert">{error}</div>;
   if (!items.length && loading) return tab === 'songs' ? <ListSkeleton /> : <ShelfSkeleton title={false} />;
   if (!items.length) return <div className="empty"><h3>No {tab} found</h3><p>Try a different spelling or search for the artist.</p></div>;
   const total = data?.total ?? 0;
@@ -84,7 +91,7 @@ function FilteredResults({ q, tab }: { q: string; tab: Exclude<Tab, 'all'> }) {
       )}
       {data && !data.lastPage && items.length < total && (
         <div style={{ display: 'flex', justifyContent: 'center', padding: 20 }}>
-          <button className="btn btn-ghost" onClick={() => setPage((p) => p + 1)} disabled={loading}>
+          <button className="btn btn-ghost glass clear" onClick={() => setPage((p) => p + 1)} disabled={loading}>
             {loading ? 'Loading…' : 'Load more'}
           </button>
         </div>
@@ -104,7 +111,7 @@ export function SearchPage() {
 
   const top = useMemo<Entity | null>(() => {
     if (!data) return null;
-    if (data.top) return data.top;
+    if (data.top) return data.top; // the catalog's own best match
     const lower = q.toLowerCase();
     const exactArtist = data.artists.results.find((a) => a.title.toLowerCase() === lower);
     if (exactArtist) return exactArtist;
@@ -125,7 +132,7 @@ export function SearchPage() {
       <div className="page">
         <div className="page-title">
           <h1>Search</h1>
-          <p className="lead">Every song on YouTube Music. Search any track, artist, album or playlist.</p>
+          <p className="lede">Every song on YouTube Music. Search any track, artist, album or playlist; press ⌘K or Ctrl K from anywhere.</p>
         </div>
         {recentSearches.length > 0 && (
           <section className="shelf">
@@ -151,7 +158,7 @@ export function SearchPage() {
   return (
     <div className="page">
       <div className="page-title">
-        <h1 className="search-title">Results for “{q}”</h1>
+        <h1 style={{ fontSize: 32, overflowWrap: 'anywhere' }}>Results for “{q}”</h1>
       </div>
       <div className="tabs" role="tablist">
         {TABS.map((t) => (
@@ -164,7 +171,7 @@ export function SearchPage() {
       {tab !== 'all' ? (
         <FilteredResults key={`${tab}:${q}`} q={q} tab={tab} />
       ) : error ? (
-        <div className="error-box">{error}</div>
+        <div className="error-box" role="alert">{error}</div>
       ) : loading && !data ? (
         <>
           <ListSkeleton rows={6} />
@@ -174,16 +181,21 @@ export function SearchPage() {
         <>
           {top && (
             <div className="search-top">
-              <TopResult item={top} />
-              <div>
-                <h2 style={{ marginBottom: 6 }}>Songs</h2>
-                <SongList songs={data.songs.results.slice(0, 6)} context={{ type: 'search', title: `Results for “${q}”` }} showAlbum={false} showHeader={false} />
-                {data.songs.total > 6 && (
-                  <button className="chip" onClick={() => setTab('songs')} style={{ marginTop: 6 }}>
-                    See all songs
-                  </button>
-                )}
-              </div>
+              <section aria-label="Top result">
+                <h2>Top result</h2>
+                <TopResult item={top} />
+              </section>
+              {data.songs.results.length > 0 && (
+                <section aria-label="Songs">
+                  <h2>Songs</h2>
+                  <SongList songs={data.songs.results.slice(0, 5)} context={{ type: 'search', title: `Results for “${q}”` }} showAlbum={false} showHeader={false} />
+                  {data.songs.total > 5 && (
+                    <button className="chip" onClick={() => setTab('songs')} style={{ marginLeft: 12, marginTop: 4 }}>
+                      See all {data.songs.total.toLocaleString()} songs
+                    </button>
+                  )}
+                </section>
+              )}
             </div>
           )}
           <Shelf title="Artists" items={data.artists.results as ArtistCard[]} seeAllTo={`/search?q=${encodeURIComponent(q)}&tab=artists`} size="sm" />

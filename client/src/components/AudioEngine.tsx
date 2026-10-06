@@ -15,6 +15,9 @@ const supportsOpus = (() => {
 })();
 export const STREAM_FORMAT: 'webm' | 'm4a' = supportsOpus ? 'webm' : 'm4a';
 
+/** Toasts quote the title; keep long ones from turning a status message into a paragraph. */
+const short = (title: string) => (title.length > 42 ? `${title.slice(0, 40).trimEnd()}…` : title);
+
 export function pickStream(song: Song, quality: Quality): string | null {
   if (!song.streams) return null;
   const base = quality === 'high' ? song.streams.high : quality === 'medium' ? song.streams.medium : song.streams.low;
@@ -100,15 +103,20 @@ export function AudioEngine() {
     const onError = () => {
       const current = store().queue[store().index];
       if (!current || !a.src) return;
-      failures.current += 1;
       store().setBuffering(false);
+      // While paused, report it but stay put: skipping would call next(), which starts playback on its own.
+      if (!store().playing) {
+        toast(`Couldn't load “${short(current.title)}”`, 'error');
+        return;
+      }
+      failures.current += 1;
       if (failures.current > 3) {
         store().setPlaying(false);
         toast('Playback stopped: too many failed tracks', 'error');
         failures.current = 0;
         return;
       }
-      toast(`Couldn't play “${current.title}”, skipping`, 'error');
+      toast(`Couldn't play “${short(current.title)}”, skipping`, 'error');
       setTimeout(() => store().next(), 400);
     };
     // Keep the store honest when the OS pauses/resumes us (audio focus loss, headphones unplugged).
@@ -272,6 +280,13 @@ export function AudioEngine() {
     if (!a || !song) return;
     if (playing) {
       if (!a.src) return;
+      // A failed source stays failed: play() on it does nothing. Retrying the same track reloads it,
+      // resuming from where it stopped.
+      if (a.error) {
+        resumeAt.current = a.currentTime || usePlayer.getState().currentTime || null;
+        switching.current = true;
+        a.load();
+      }
       a.play().catch((err: unknown) => {
         if (err instanceof DOMException && err.name === 'NotAllowedError') {
           usePlayer.getState().setPlaying(false);

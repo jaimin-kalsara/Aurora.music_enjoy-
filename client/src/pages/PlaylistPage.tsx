@@ -6,7 +6,7 @@ import { Hero } from '../components/Hero';
 import { SongList } from '../components/SongList';
 import { HeroSkeleton, ListSkeleton } from '../components/Skeleton';
 import { Pause, Play, Shuffle, Queue as QueueIcon } from '../components/Icons';
-import { formatCount, formatDurationLong } from '../utils/format';
+import { formatCount, formatDurationLong, songCount } from '../utils/format';
 import { toast } from '../store/toast';
 
 export function PlaylistPage() {
@@ -23,9 +23,9 @@ export function PlaylistPage() {
   if (error) {
     return (
       <div className="page">
-        <div className="error-box">
+        <div className="error-box" role="alert">
           <span>{error}</span>
-          <button className="btn btn-ghost btn-sm" onClick={refetch}>Retry</button>
+          <button className="btn btn-ghost glass clear btn-sm" onClick={refetch}>Try again</button>
         </div>
       </div>
     );
@@ -55,17 +55,17 @@ export function PlaylistPage() {
         image={data.image}
         subtitle={data.subtitle}
         description={data.description}
-        stats={[data.followers ? `${formatCount(data.followers)} followers` : null, `${data.songCount || songs.length} songs`, formatDurationLong(total) || null].filter(Boolean).join(' · ')}
+        stats={[data.followers ? `${formatCount(data.followers)} followers` : null, songCount(data.songCount || songs.length), formatDurationLong(total) || null].filter(Boolean).join(' · ')}
         actions={
           <>
             <button className="btn btn-primary" onClick={() => (isCurrent ? toggle() : start(false))} disabled={!songs.length}>
               {isCurrent && playing ? <Pause size={18} /> : <Play size={18} />}
               {isCurrent && playing ? 'Pause' : 'Play'}
             </button>
-            <button className="btn btn-ghost" onClick={() => start(true)} disabled={!songs.length}>
+            <button className="btn btn-ghost glass clear" onClick={() => start(true)} disabled={!songs.length}>
               <Shuffle size={18} /> Shuffle
             </button>
-            <button className="btn btn-ghost" onClick={() => { enqueue(songs); toast('Playlist added to queue'); }} disabled={!songs.length}>
+            <button className="btn btn-ghost glass clear" onClick={() => { enqueue(songs); toast('Playlist added to queue'); }} disabled={!songs.length}>
               <QueueIcon size={18} /> Queue
             </button>
           </>

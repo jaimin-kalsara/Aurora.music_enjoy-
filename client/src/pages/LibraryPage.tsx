@@ -4,7 +4,7 @@ import { useLibrary, useLikedSongs } from '../store/library';
 import { usePlayer } from '../store/player';
 import { SongList } from '../components/SongList';
 import { Heart, Clock, Play, Shuffle } from '../components/Icons';
-import { formatDurationLong } from '../utils/format';
+import { formatDurationLong, songCount } from '../utils/format';
 
 type Tab = 'liked' | 'recent';
 
@@ -32,7 +32,7 @@ export function LibraryPage() {
     <div className="page">
       <div className="page-title">
         <h1>Your Library</h1>
-        <p className="lead">Everything you’ve loved and everything you’ve played, kept on this device.</p>
+        <p className="lede">Everything you’ve loved and everything you’ve played, kept on this device.</p>
       </div>
       <div className="tabs" role="tablist">
         <button role="tab" aria-selected={tab === 'liked'} className={`chip ${tab === 'liked' ? 'on' : ''}`} onClick={() => setParams({ tab: 'liked' })}>
@@ -43,20 +43,20 @@ export function LibraryPage() {
         </button>
       </div>
 
-      <motion.div key={tab} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}>
+      <motion.div key={tab} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.18 }} role="tabpanel">
         <div className="row" style={{ justifyContent: 'space-between', padding: '6px 0 10px', flexWrap: 'wrap', gap: 12 }}>
           <div className="muted">
-            {songs.length} songs{total ? ` · ${formatDurationLong(total)}` : ''}
+            {songCount(songs.length)}{total ? ` · ${formatDurationLong(total)}` : ''}
           </div>
           <div className="row">
             <button className="btn btn-primary btn-sm" onClick={() => start(false)} disabled={!songs.length}>
               <Play size={16} /> Play
             </button>
-            <button className="btn btn-ghost btn-sm" onClick={() => start(true)} disabled={!songs.length}>
+            <button className="btn btn-ghost glass clear btn-sm" onClick={() => start(true)} disabled={!songs.length}>
               <Shuffle size={16} /> Shuffle
             </button>
             {tab === 'recent' && songs.length > 0 && (
-              <button className="btn btn-ghost btn-sm" onClick={clearRecent}>Clear history</button>
+              <button className="btn btn-ghost glass clear btn-sm" onClick={clearRecent}>Clear history</button>
             )}
           </div>
         </div>

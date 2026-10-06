@@ -24,6 +24,10 @@ export function formatCount(n: number): string {
   return String(n);
 }
 
+export function songCount(n: number): string {
+  return `${n.toLocaleString()} ${n === 1 ? 'song' : 'songs'}`;
+}
+
 export function capitalize(s: string): string {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 }
